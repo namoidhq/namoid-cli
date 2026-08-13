@@ -20,6 +20,14 @@ async function readJson(filePath) {
   }
 }
 
+async function readText(filePath) {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
 async function findFiles(root, relativeDirectories, names) {
   const found = [];
   for (const directory of relativeDirectories) {
@@ -96,11 +104,28 @@ function detectFramework(dependencies) {
   return "unknown";
 }
 
+async function detectPackageManager(root, pkg) {
+  if (typeof pkg?.packageManager === "string") return pkg.packageManager.split("@")[0];
+  const candidates = [
+    ["pnpm-lock.yaml", "pnpm"],
+    ["yarn.lock", "yarn"],
+    ["bun.lock", "bun"],
+    ["bun.lockb", "bun"],
+    ["package-lock.json", "npm"],
+  ];
+  const detected = [];
+  for (const [file, manager] of candidates) {
+    if (await exists(path.join(root, file))) detected.push({ file, manager });
+  }
+  return detected.length === 1 ? detected[0].manager : detected.length > 1 ? "ambiguous" : null;
+}
+
 export async function inspectProject(root) {
   const packagePath = path.join(root, "package.json");
   const pkg = await readJson(packagePath);
   const dependencies = dependenciesOf(pkg);
   const framework = detectFramework(dependencies);
+  const packageManager = await detectPackageManager(root, pkg);
   const sdkPackages = ["@namoidhq/nextjs", "@namoidhq/js"]
     .filter((name) => dependencies[name])
     .map((name) => ({ name, version: dependencies[name] }));
@@ -125,25 +150,34 @@ export async function inspectProject(root) {
   )).filter(Boolean);
 
   const envNames = new Set();
+  const publicEnvValues = {};
   for (const envFile of envFiles) {
     const content = await readFile(path.join(root, envFile), "utf8");
     for (const line of content.split(/\r?\n/)) {
-      const match = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=/);
-      if (match) envNames.add(match[1]);
+      const match = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
+      if (!match) continue;
+      envNames.add(match[1]);
+      if (match[1] === "NEXT_PUBLIC_APP_URL") {
+        publicEnvValues[match[1]] = match[2].replace(/^['"]|['"]$/g, "");
+      }
     }
   }
 
   const sourceFindings = await scanSource(root);
+  const gitignore = await readText(path.join(root, ".gitignore"));
 
   return {
     root,
     packageJson: pkg ? "package.json" : null,
     packageName: typeof pkg?.name === "string" ? pkg.name : null,
     framework,
+    packageManager,
     sdkPackages,
     callbackCandidates,
     envFiles,
     envNames: [...envNames].sort(),
+    publicEnvValues,
+    gitignore: gitignore === null ? null : gitignore.split(/\r?\n/),
     sourceFindings,
   };
 }
@@ -158,6 +192,14 @@ export function diagnoseProject(project) {
     project.packageJson
       ? check("project.package_json", "pass", "Found package.json.")
       : check("project.package_json", "fail", "No package.json was found.", "Run this command from the application root."),
+  );
+
+  checks.push(
+    project.packageManager === "ambiguous"
+      ? check("project.package_manager", "fail", "Multiple package-manager lockfiles were detected.", "Keep one package-manager lockfile before allowing generated changes.")
+      : project.packageManager
+        ? check("project.package_manager", "pass", `Detected ${project.packageManager}.`)
+        : check("project.package_manager", "warn", "No package manager was detected.", "Declare packageManager in package.json or create one lockfile."),
   );
 
   checks.push(
@@ -206,6 +248,47 @@ export function diagnoseProject(project) {
       project.envNames.includes(name)
         ? check(`env.${name.toLowerCase()}`, "pass", `${name} is declared.`)
         : check(`env.${name.toLowerCase()}`, "fail", `${name} is not declared.`, `Add ${name} to the appropriate local environment file.`),
+    );
+  }
+
+  const publicAppUrl = project.publicEnvValues.NEXT_PUBLIC_APP_URL;
+  if (publicAppUrl) {
+    let publicUrlStatus = "pass";
+    let publicUrlMessage = "NEXT_PUBLIC_APP_URL is an absolute application URL.";
+    let publicUrlRemediation = null;
+    try {
+      const parsed = new URL(publicAppUrl);
+      if (["0.0.0.0", "api", "web"].includes(parsed.hostname)) {
+        publicUrlStatus = "fail";
+        publicUrlMessage = `NEXT_PUBLIC_APP_URL uses internal host ${parsed.hostname}.`;
+        publicUrlRemediation = "Set it to the browser-visible application origin used in registered callbacks.";
+      }
+    } catch {
+      publicUrlStatus = "fail";
+      publicUrlMessage = "NEXT_PUBLIC_APP_URL is not an absolute URL.";
+      publicUrlRemediation = "Use an absolute URL such as http://localhost:3000 or https://app.example.com.";
+    }
+    checks.push(check("env.public_app_url", publicUrlStatus, publicUrlMessage, publicUrlRemediation));
+  }
+
+  const publicSecretNames = project.envNames.filter((name) =>
+    /^(?:NEXT_PUBLIC_|PUBLIC_|VITE_).*(?:SECRET|TOKEN|PRIVATE|PASSWORD|API_KEY)/.test(name),
+  );
+  checks.push(
+    publicSecretNames.length === 0
+      ? check("env.public_secrets", "pass", "No secret-like public environment-variable names were detected.")
+      : check("env.public_secrets", "fail", `Secret-like variables use a public prefix: ${publicSecretNames.join(", ")}.`, "Move secrets to server-only environment variables and rotate any value already exposed to a browser build."),
+  );
+
+  if (project.envFiles.some((name) => name === ".env" || name === ".env.local")) {
+    const ignored = project.gitignore?.some((line) => {
+      const rule = line.trim();
+      return rule === ".env*" || rule === ".env" || rule === ".env.local";
+    });
+    checks.push(
+      ignored
+        ? check("env.gitignore", "pass", "Local environment files are ignored by Git.")
+        : check("env.gitignore", "fail", "A local environment file exists but is not clearly ignored by Git.", "Add .env* to .gitignore and explicitly allow only a redacted .env.example if needed."),
     );
   }
 

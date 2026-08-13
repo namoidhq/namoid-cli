@@ -13,6 +13,7 @@ test("detects a configured Next.js application without reading values", async ()
   const root = await fixture("nextjs");
   await writeFile(path.join(root, "package.json"), JSON.stringify({
     name: "acme-web",
+    packageManager: "pnpm@10.20.0",
     dependencies: { next: "15.5.0", react: "19.0.0", "@namoidhq/nextjs": "4.0.0" },
   }));
   await writeFile(path.join(root, ".env.local"), [
@@ -20,6 +21,7 @@ test("detects a configured Next.js application without reading values", async ()
     "NAMOID_CLIENT_SECRET=must-not-leak",
     "NEXT_PUBLIC_APP_URL=http://localhost:3000",
   ].join("\n"));
+  await writeFile(path.join(root, ".gitignore"), ".env*\n!.env.example\n");
   const callback = path.join(root, "app/api/auth/callback");
   await mkdir(callback, { recursive: true });
   await writeFile(path.join(callback, "route.ts"), "export const GET = () => null;\n");
@@ -28,6 +30,7 @@ test("detects a configured Next.js application without reading values", async ()
   const result = diagnoseProject(project);
 
   assert.equal(project.framework, "nextjs");
+  assert.equal(project.packageManager, "pnpm");
   assert.deepEqual(project.callbackCandidates, ["app/api/auth/callback/route.ts"]);
   assert.ok(project.envNames.includes("NAMOID_CLIENT_SECRET"));
   assert.equal(JSON.stringify(project).includes("must-not-leak"), false);
@@ -68,4 +71,27 @@ test("detects Next.js prefetch and internal proxy redirect hazards", async () =>
 
   assert.ok(result.checks.some((item) => item.id === "nextjs.auth_full_navigation" && item.status === "fail"));
   assert.ok(result.checks.some((item) => item.id === "nextjs.public_callback_redirect" && item.status === "fail"));
+});
+
+test("rejects internal app origins and public secret names without exposing values", async () => {
+  const root = await fixture("unsafe-env");
+  await writeFile(path.join(root, "package.json"), JSON.stringify({
+    name: "unsafe-env-app",
+    packageManager: "npm@11.0.0",
+    dependencies: { react: "19.0.0", "@namoidhq/js": "3.2.0" },
+  }));
+  await writeFile(path.join(root, ".env"), [
+    "NAMOID_CLIENT_ID=public-client",
+    "NEXT_PUBLIC_APP_URL=http://0.0.0.0:80",
+    "NEXT_PUBLIC_NAMOID_CLIENT_SECRET=do-not-print-this",
+  ].join("\n"));
+
+  const project = await inspectProject(root);
+  const result = diagnoseProject(project);
+  const serialized = JSON.stringify({ project, result });
+
+  assert.ok(result.checks.some((item) => item.id === "env.public_app_url" && item.status === "fail"));
+  assert.ok(result.checks.some((item) => item.id === "env.public_secrets" && item.status === "fail"));
+  assert.ok(result.checks.some((item) => item.id === "env.gitignore" && item.status === "fail"));
+  assert.equal(serialized.includes("do-not-print-this"), false);
 });

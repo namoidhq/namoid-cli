@@ -41,6 +41,7 @@ function printHelp() {
 function printDetection(project) {
   process.stdout.write(`Application: ${project.packageName ?? "unknown"}\n`);
   process.stdout.write(`Framework: ${project.framework}\n`);
+  process.stdout.write(`Package manager: ${project.packageManager ?? "not found"}\n`);
   process.stdout.write(`NamoID SDK: ${project.sdkPackages.map((item) => `${item.name} ${item.version}`).join(", ") || "not found"}\n`);
   process.stdout.write(`Callback route: ${project.callbackCandidates[0] ?? "not found"}\n`);
 }
