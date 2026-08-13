@@ -32,3 +32,7 @@ credential storage are complete.
 Host plugins live in separate repositories. The CLI installs only immutable
 releases pinned to an exact Git commit and deterministic archive SHA-256; it
 never downloads plugin code from a moving branch.
+
+Run `namoid ai setup codex` or `namoid ai setup claude` to verify and install
+the corresponding marketplace for the current user. Add `--dry-run` to preview
+the release identity and installation steps without changing host settings.

@@ -3,6 +3,7 @@ import path from "node:path";
 import { diagnoseProject, inspectProject } from "./project.js";
 import { buildOnboardingPlan } from "./planner.js";
 import { pluginPlan } from "./plugins.js";
+import { installHostPlugin } from "./plugin-installer.js";
 
 const VERSION = "0.1.0";
 
@@ -76,13 +77,10 @@ export async function run(argv) {
     }
     const result = pluginPlan(host);
     if (!flags.dryRun) {
-      const unavailable = {
-        code: "pinned_release_required",
-        message: "Plugin installation stays disabled until the repository has a signed, immutable release and published SHA-256 digest. Run with --dry-run to inspect the plan.",
-      };
-      if (flags.json) jsonOutput("ai.setup", false, unavailable);
-      else process.stderr.write(`${unavailable.message}\n`);
-      process.exitCode = 2;
+      const installed = installHostPlugin(result);
+      const output = { ...result, installed };
+      if (flags.json) jsonOutput("ai.setup", true, output);
+      else process.stdout.write(`${result.displayName} plugin installed and verified at ${installed.checkoutPath}\n`);
       return;
     }
     if (flags.json) jsonOutput("ai.setup", true, result);
