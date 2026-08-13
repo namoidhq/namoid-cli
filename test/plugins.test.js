@@ -12,6 +12,8 @@ test("plans only pinned plugin releases", () => {
   const plan = pluginPlan("codex");
   assert.equal(plan.releaseTag, "v0.1.0");
   assert.equal(plan.mutableSourceAllowed, false);
+  assert.match(plan.releaseCommit, /^[0-9a-f]{40}$/);
+  assert.match(plan.archiveSha256, /^[0-9a-f]{64}$/);
   assert.equal(plan.actions[0].id, "plugin.release.verify");
   assert.ok(plan.actions.some((action) => action.id === "plugin.oauth.authorize"));
 });

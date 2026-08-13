@@ -29,5 +29,6 @@ The CLI uses the same Setup Assistant MCP resource and
 exposed as `namoid login` until loopback interoperability and operating-system
 credential storage are complete.
 
-Host plugins live in separate repositories. The CLI installs only immutable,
-integrity-checked releases; it never downloads plugin code from a moving branch.
+Host plugins live in separate repositories. The CLI installs only immutable
+releases pinned to an exact Git commit and deterministic archive SHA-256; it
+never downloads plugin code from a moving branch.
