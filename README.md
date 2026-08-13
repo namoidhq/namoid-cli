@@ -1,6 +1,29 @@
 # NamoID CLI
 
+[![npm](https://img.shields.io/npm/v/@namoidhq/cli.svg?label=%40namoidhq%2Fcli)](https://www.npmjs.com/package/@namoidhq/cli)
+[![CI](https://github.com/namoidhq/namoid-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/namoidhq/namoid-cli/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 Deterministic local setup and diagnostics for NamoID Customer Identity.
+
+## Install
+
+Run without installing globally:
+
+```bash
+npx @namoidhq/cli --help
+```
+
+Or install the `namoid` command:
+
+```bash
+npm install --global @namoidhq/cli
+namoid --help
+```
+
+Requires Node.js 20 or newer.
+
+## Commands
 
 Project inspection and planning commands are read-only. AI setup installs a
 verified host plugin but does not modify the inspected application:
@@ -49,3 +72,21 @@ namoid plugin uninstall codex
 Mutating commands prompt by default. Use `--yes` only for an intentional
 non-interactive run. `--json` returns the stable schema used by automation, and
 `--plain` keeps output decoration-free.
+
+## Security
+
+The CLI does not print environment-variable values and verifies AI plugins
+against an immutable Git commit and deterministic archive SHA-256 before
+installation. Report vulnerabilities privately according to
+[SECURITY.md](./SECURITY.md).
+
+## Links
+
+- [NamoID](https://namoid.in)
+- [Documentation](https://docs.namoid.in)
+- [Issues](https://github.com/namoidhq/namoid-cli/issues)
+- [npm package](https://www.npmjs.com/package/@namoidhq/cli)
+
+## License
+
+[MIT](./LICENSE) © PolyMindsLabs Pvt. Ltd.

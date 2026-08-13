@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://docs.namoid.in
+    about: Read the NamoID integration documentation before filing an issue.
+  - name: Security reports
+    url: mailto:security@namoid.in
+    about: Report vulnerabilities privately. Do not open a public issue.

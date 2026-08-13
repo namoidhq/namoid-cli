@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Syntax checks
+        run: npm run check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Validate package contents
+        run: npm pack --dry-run
