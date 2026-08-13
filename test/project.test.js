@@ -47,3 +47,25 @@ test("reports actionable failures for an incomplete React application", async ()
   assert.ok(result.checks.some((item) => item.id === "namoid.sdk" && item.status === "fail"));
   assert.ok(result.checks.some((item) => item.id === "env.namoid_client_id" && item.status === "fail"));
 });
+
+test("detects Next.js prefetch and internal proxy redirect hazards", async () => {
+  const root = await fixture("hazards");
+  await writeFile(path.join(root, "package.json"), JSON.stringify({
+    name: "unsafe-next-app",
+    dependencies: { next: "15.5.0", react: "19.0.0", "@namoidhq/nextjs": "4.0.0" },
+  }));
+  const callback = path.join(root, "app/api/auth/callback");
+  await mkdir(callback, { recursive: true });
+  await writeFile(path.join(callback, "route.ts"), 'return Response.redirect(new URL("/dashboard", request.url));\n');
+  await writeFile(path.join(root, "app.tsx"), 'return <Link href="/api/auth/login">Sign in</Link>;\n');
+  await writeFile(path.join(root, ".env.example"), [
+    "NAMOID_CLIENT_ID=",
+    "NAMOID_CLIENT_SECRET=",
+    "NEXT_PUBLIC_APP_URL=",
+  ].join("\n"));
+
+  const result = diagnoseProject(await inspectProject(root));
+
+  assert.ok(result.checks.some((item) => item.id === "nextjs.auth_full_navigation" && item.status === "fail"));
+  assert.ok(result.checks.some((item) => item.id === "nextjs.public_callback_redirect" && item.status === "fail"));
+});

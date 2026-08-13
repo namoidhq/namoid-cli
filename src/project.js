@@ -39,6 +39,52 @@ async function findFiles(root, relativeDirectories, names) {
   return found.sort();
 }
 
+async function findSourceFiles(root) {
+  const files = [];
+  const ignored = new Set([".git", ".next", "build", "dist", "node_modules"]);
+  async function walk(directory, depth) {
+    if (depth > 8) return;
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!ignored.has(entry.name)) await walk(path.join(directory, entry.name), depth + 1);
+        continue;
+      }
+      if (/\.(?:js|jsx|mjs|ts|tsx)$/.test(entry.name)) files.push(path.join(directory, entry.name));
+    }
+  }
+  await walk(root, 0);
+  return files.sort();
+}
+
+async function scanSource(root) {
+  const findings = {
+    nextAuthLinks: [],
+    internalOriginRedirects: [],
+  };
+  for (const absolute of await findSourceFiles(root)) {
+    let content;
+    try {
+      content = await readFile(absolute, "utf8");
+    } catch {
+      continue;
+    }
+    const relative = path.relative(root, absolute);
+    if (/<Link\b[^>]*href=(?:["']\/api\/auth\/(?:login|logout)["']|\{[^}]*\/api\/auth\/(?:login|logout)[^}]*\})/s.test(content)) {
+      findings.nextAuthLinks.push(relative);
+    }
+    if (/new URL\(\s*["']\/(?:dashboard|account|app)[^"']*["']\s*,\s*request\.url\s*\)/.test(content)) {
+      findings.internalOriginRedirects.push(relative);
+    }
+  }
+  return findings;
+}
+
 function dependenciesOf(pkg) {
   return { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
 }
@@ -87,6 +133,8 @@ export async function inspectProject(root) {
     }
   }
 
+  const sourceFindings = await scanSource(root);
+
   return {
     root,
     packageJson: pkg ? "package.json" : null,
@@ -96,6 +144,7 @@ export async function inspectProject(root) {
     callbackCandidates,
     envFiles,
     envNames: [...envNames].sort(),
+    sourceFindings,
   };
 }
 
@@ -128,6 +177,26 @@ export function diagnoseProject(project) {
       project.callbackCandidates.length > 0
         ? check("namoid.callback_route", "pass", `Found callback route: ${project.callbackCandidates[0]}.`)
         : check("namoid.callback_route", "fail", "No NamoID callback route was detected.", "Create app/api/auth/callback/route.ts or src/app/api/auth/callback/route.ts."),
+    );
+    checks.push(
+      project.sourceFindings.nextAuthLinks.length === 0
+        ? check("nextjs.auth_full_navigation", "pass", "Authentication routes use full browser navigation.")
+        : check(
+            "nextjs.auth_full_navigation",
+            "fail",
+            `Next.js Link targets an authentication route in ${project.sourceFindings.nextAuthLinks.join(", ")}.`,
+            "Use a normal <a href> for /api/auth/login and /api/auth/logout so Next.js cannot prefetch an OAuth transaction.",
+          ),
+    );
+    checks.push(
+      project.sourceFindings.internalOriginRedirects.length === 0
+        ? check("nextjs.public_callback_redirect", "pass", "No callback redirect derived from an internal request origin was detected.")
+        : check(
+            "nextjs.public_callback_redirect",
+            "fail",
+            `Callback redirect derives its origin from request.url in ${project.sourceFindings.internalOriginRedirects.join(", ")}.`,
+            "Build the post-login URL from the configured public application URL, not request.url behind a reverse proxy.",
+          ),
     );
   }
 

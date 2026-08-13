@@ -1,6 +1,7 @@
 import process from "node:process";
 import path from "node:path";
 import { diagnoseProject, inspectProject } from "./project.js";
+import { buildOnboardingPlan } from "./planner.js";
 
 const VERSION = "0.1.0";
 
@@ -87,26 +88,12 @@ export async function run(argv) {
       return;
     }
     const diagnosis = diagnoseProject(project);
-    const result = {
-      mode: "dry-run",
-      detection: { framework: project.framework, packageName: project.packageName },
-      proposedActions: [
-        "Authenticate with NamoID using Authorization Code + PKCE",
-        "Select or create a workspace and project",
-        "Select the Test environment",
-        "Select or create an application",
-        "Register exact callback and logout URLs",
-        "Install the supported NamoID SDK",
-        "Preview local configuration changes",
-        "Run the Hosted Auth readiness checks",
-      ],
-      diagnosis,
-    };
+    const result = buildOnboardingPlan(project, diagnosis);
     if (flags.json) jsonOutput(command, true, result);
     else {
       printDetection(project);
       process.stdout.write("\nDry run — no files or NamoID configuration will change.\n");
-      result.proposedActions.forEach((action, index) => process.stdout.write(`${index + 1}. ${action}\n`));
+      result.actions.forEach((item, index) => process.stdout.write(`${index + 1}. ${item.description}\n`));
     }
     return;
   }
