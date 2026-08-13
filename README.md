@@ -2,7 +2,8 @@
 
 Deterministic local setup and diagnostics for NamoID Customer Identity.
 
-The current foundation release is read-only:
+Project inspection and planning commands are read-only. AI setup installs a
+verified host plugin but does not modify the inspected application:
 
 ```bash
 node ./bin/namoid.js detect
@@ -17,17 +18,10 @@ It detects supported frameworks, installed NamoID SDKs, callback routes, and
 required environment-variable names. It never prints environment-variable
 values.
 
-Authenticated setup and repository mutation remain intentionally unavailable
-until the CLI OAuth client, shared management endpoints, atomic edit plan, and
-Live-environment authorization boundary are complete.
-
-The internal OAuth foundation discovers the protected MCP resource and its
-authorization server, validates issuer discovery, requires PKCE S256, supports
-loopback redirects, and exchanges authorization codes without a client secret.
-The CLI uses the same Setup Assistant MCP resource and
-`setup.read` / `setup.write` authorization model as AI MCP clients. It is not
-exposed as `namoid login` until loopback interoperability and operating-system
-credential storage are complete.
+The CLI does not implement a second MCP or OAuth client. After verified plugin
+installation, Codex or Claude owns browser authorization, token handling, and
+the Setup Assistant MCP connection. This keeps one authorization path per host
+and prevents duplicated credential storage in the CLI.
 
 Host plugins live in separate repositories. The CLI installs only immutable
 releases pinned to an exact Git commit and deterministic archive SHA-256; it
