@@ -2,6 +2,7 @@ import process from "node:process";
 import path from "node:path";
 import { diagnoseProject, inspectProject } from "./project.js";
 import { buildOnboardingPlan } from "./planner.js";
+import { pluginPlan } from "./plugins.js";
 
 const VERSION = "0.1.0";
 
@@ -18,7 +19,7 @@ function parseArgs(argv) {
       flags.cwd = path.resolve(argv[index]);
     } else positional.push(arg);
   }
-  return { command: positional[0] ?? "help", flags };
+  return { command: positional[0] ?? "help", args: positional.slice(1), flags };
 }
 
 function jsonOutput(command, ok, result) {
@@ -32,6 +33,7 @@ function printHelp() {
   process.stdout.write("  detect            Detect the local application and NamoID SDK\n");
   process.stdout.write("  doctor            Diagnose the local NamoID integration\n");
   process.stdout.write("  init --dry-run     Preview the onboarding plan without making changes\n");
+  process.stdout.write("  ai setup <host> --dry-run  Preview Codex or Claude plugin setup\n");
   process.stdout.write("\nOptions:\n");
   process.stdout.write("  --cwd <directory>  Inspect another application directory\n");
   process.stdout.write("  --json             Print versioned machine-readable output\n");
@@ -56,13 +58,39 @@ function printDoctor(result) {
 }
 
 export async function run(argv) {
-  const { command, flags } = parseArgs(argv);
+  const { command, args, flags } = parseArgs(argv);
   if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
     return;
   }
   if (command === "--version" || command === "-v" || command === "version") {
     process.stdout.write(`${VERSION}\n`);
+    return;
+  }
+
+  if (command === "ai") {
+    const action = args[0];
+    const host = args[1];
+    if (action !== "setup" || !host) {
+      throw new Error("Usage: namoid ai setup <codex|claude> --dry-run");
+    }
+    const result = pluginPlan(host);
+    if (!flags.dryRun) {
+      const unavailable = {
+        code: "pinned_release_required",
+        message: "Plugin installation stays disabled until the repository has a signed, immutable release and published SHA-256 digest. Run with --dry-run to inspect the plan.",
+      };
+      if (flags.json) jsonOutput("ai.setup", false, unavailable);
+      else process.stderr.write(`${unavailable.message}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    if (flags.json) jsonOutput("ai.setup", true, result);
+    else {
+      process.stdout.write(`${result.displayName} plugin ${result.releaseTag}\n`);
+      process.stdout.write("Dry run — no marketplace or host configuration will change.\n");
+      result.actions.forEach((item, index) => process.stdout.write(`${index + 1}. ${item.description}\n`));
+    }
     return;
   }
 

@@ -9,6 +9,8 @@ node ./bin/namoid.js detect
 node ./bin/namoid.js doctor
 node ./bin/namoid.js init --dry-run
 node ./bin/namoid.js doctor --json
+node ./bin/namoid.js ai setup codex --dry-run
+node ./bin/namoid.js ai setup claude --dry-run
 ```
 
 It detects supported frameworks, installed NamoID SDKs, callback routes, and
@@ -26,3 +28,6 @@ The CLI uses the same Setup Assistant MCP resource and
 `setup.read` / `setup.write` authorization model as AI MCP clients. It is not
 exposed as `namoid login` until loopback interoperability and operating-system
 credential storage are complete.
+
+Host plugins live in separate repositories. The CLI installs only immutable,
+integrity-checked releases; it never downloads plugin code from a moving branch.
