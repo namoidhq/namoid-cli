@@ -4,11 +4,11 @@
   "description": "Set up and validate NamoID authentication from the command line.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/namoidhq/cli.git"
+    "url": "git+https://github.com/namoidhq/namoid-cli.git"
   },
-  "homepage": "https://github.com/namoidhq/cli#readme",
+  "homepage": "https://github.com/namoidhq/namoid-cli#readme",
   "bugs": {
-    "url": "https://github.com/namoidhq/cli/issues"
+    "url": "https://github.com/namoidhq/namoid-cli/issues"
   },
   "type": "module",
   "bin": {
