@@ -1,0 +1,38 @@
+name: publish-npm
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Update npm to latest
+        run: npm install -g npm@latest
+
+      - name: Verify package
+        run: |
+          npm run check
+          npm test
+
+      - name: Build package archive
+        run: npm pack
+
+      - name: Stage @namoidhq/cli
+        run: npm stage publish namoidhq-cli-*.tgz
