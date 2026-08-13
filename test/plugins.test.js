@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { HOST_PLUGINS, pluginPlan } from "../src/plugins.js";
+import { HOST_PLUGINS, pluginPlan, resolveHost } from "../src/plugins.js";
 
 test("keeps Codex and Claude packaging separate while sharing one plugin identity", () => {
   assert.notEqual(HOST_PLUGINS.codex.repository, HOST_PLUGINS.claude.repository);
@@ -20,4 +20,11 @@ test("plans only pinned plugin releases", () => {
 
 test("rejects unknown AI hosts", () => {
   assert.throws(() => pluginPlan("unknown"), /Unsupported AI host/);
+});
+
+test("resolves stable host aliases", () => {
+  assert.equal(resolveHost("cc"), HOST_PLUGINS.claude);
+  assert.equal(resolveHost("claude-code"), HOST_PLUGINS.claude);
+  assert.equal(resolveHost("openai"), HOST_PLUGINS.codex);
+  assert.equal(resolveHost("unknown"), undefined);
 });

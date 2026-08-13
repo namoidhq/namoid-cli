@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -24,7 +24,44 @@ export function hostInstallCommands(plugin, checkoutPath) {
   throw new Error(`Unsupported AI host: ${plugin.host}`);
 }
 
-export function installHostPlugin(plugin, {
+export function hostUninstallCommands(plugin) {
+  const selector = `${plugin.pluginName}@namoid`;
+  if (plugin.host === "codex") return [
+    ["codex", ["plugin", "remove", selector]],
+    ["codex", ["plugin", "marketplace", "remove", "namoid"]],
+  ];
+  if (plugin.host === "claude") return [
+    ["claude", ["plugin", "uninstall", selector, "--scope", "user"]],
+    ["claude", ["plugin", "marketplace", "remove", "namoid", "--scope", "user"]],
+  ];
+  throw new Error(`Unsupported AI host: ${plugin.host}`);
+}
+
+export function detectHost(plugin, run = execFileSync) {
+  try {
+    run(process.platform === "win32" ? "where" : "which", [plugin.executable], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function hostPluginStatus(plugin, { home = homedir(), run = execFileSync } = {}) {
+  const detected = detectHost(plugin, run);
+  if (!detected) return { host: plugin.host, detected: false, installed: false, version: plugin.version };
+  try {
+    const output = run(plugin.executable, ["plugin", "list", "--json"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const installed = JSON.stringify(JSON.parse(output)).includes(plugin.pluginName);
+    return { host: plugin.host, detected: true, installed, version: plugin.version, cached: existsSync(pluginCachePath(plugin, home)) };
+  } catch {
+    return { host: plugin.host, detected: true, installed: false, version: plugin.version, cached: existsSync(pluginCachePath(plugin, home)), status: "unknown" };
+  }
+}
+
+export function preparePluginCheckout(plugin, {
   home = homedir(),
   run = execFileSync,
 } = {}) {
@@ -47,12 +84,33 @@ export function installHostPlugin(plugin, {
     rmSync(checkoutPath, { recursive: true, force: true });
     mkdirSync(path.dirname(checkoutPath), { recursive: true, mode: 0o700 });
     renameSync(temporaryPath, checkoutPath);
-    for (const [command, args] of hostInstallCommands(plugin, checkoutPath)) {
-      run(command, args, { stdio: "inherit" });
-    }
     return { checkoutPath, commit, digest };
   } catch (error) {
     rmSync(temporaryPath, { recursive: true, force: true });
     throw error;
   }
+}
+
+export function installPreparedPlugin(plugin, prepared, { run = execFileSync } = {}) {
+  for (const [command, args] of hostInstallCommands(plugin, prepared.checkoutPath)) {
+    run(command, args, { stdio: "inherit" });
+  }
+  return prepared;
+}
+
+export function installHostPlugin(plugin, options = {}) {
+  const prepared = preparePluginCheckout(plugin, options);
+  return installPreparedPlugin(plugin, prepared, options);
+}
+
+export function uninstallHostPlugin(plugin, { home = homedir(), run = execFileSync } = {}) {
+  for (const [command, args] of hostUninstallCommands(plugin)) run(command, args, { stdio: "inherit" });
+  rmSync(path.join(home, ".namoid", "plugins", plugin.host), { recursive: true, force: true });
+  return { host: plugin.host, removed: true };
+}
+
+export function updateHostPlugin(plugin, options = {}) {
+  const prepared = preparePluginCheckout(plugin, options);
+  uninstallHostPlugin(plugin, options);
+  return installPreparedPlugin(plugin, prepared, options);
 }

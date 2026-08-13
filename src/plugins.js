@@ -3,6 +3,8 @@ const VERSION = "0.1.0";
 export const HOST_PLUGINS = Object.freeze({
   codex: Object.freeze({
     host: "codex",
+    aliases: ["openai"],
+    executable: "codex",
     displayName: "Codex",
     repository: "https://github.com/namoidhq/namoid-codex-plugin",
     version: VERSION,
@@ -13,6 +15,8 @@ export const HOST_PLUGINS = Object.freeze({
   }),
   claude: Object.freeze({
     host: "claude",
+    aliases: ["claude-code", "cc"],
+    executable: "claude",
     displayName: "Claude Code",
     repository: "https://github.com/namoidhq/namoid-claude-plugin",
     version: VERSION,
@@ -23,8 +27,13 @@ export const HOST_PLUGINS = Object.freeze({
   }),
 });
 
+export function resolveHost(value) {
+  const needle = String(value ?? "").toLowerCase();
+  return Object.values(HOST_PLUGINS).find((plugin) => plugin.host === needle || plugin.aliases.includes(needle));
+}
+
 export function pluginPlan(host) {
-  const plugin = HOST_PLUGINS[host];
+  const plugin = resolveHost(host);
   if (!plugin) {
     throw new Error(`Unsupported AI host: ${host}. Supported hosts: ${Object.keys(HOST_PLUGINS).join(", ")}`);
   }

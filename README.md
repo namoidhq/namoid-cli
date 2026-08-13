@@ -12,6 +12,10 @@ node ./bin/namoid.js init --dry-run
 node ./bin/namoid.js doctor --json
 node ./bin/namoid.js ai setup codex --dry-run
 node ./bin/namoid.js ai setup claude --dry-run
+node ./bin/namoid.js setup
+node ./bin/namoid.js setup codex --dry-run
+node ./bin/namoid.js plugin status
+node ./bin/namoid.js plugin update claude --dry-run
 ```
 
 It detects supported frameworks, installed NamoID SDKs, callback routes, and
@@ -30,3 +34,18 @@ never downloads plugin code from a moving branch.
 Run `namoid ai setup codex` or `namoid ai setup claude` to verify and install
 the corresponding marketplace for the current user. Add `--dry-run` to preview
 the release identity and installation steps without changing host settings.
+
+## Plugin lifecycle
+
+```bash
+namoid setup                         # detect supported AI hosts
+namoid setup codex                   # verified install with confirmation
+namoid plugin install cc             # aliases: cc, claude-code, openai
+namoid plugin status                 # inspect all supported hosts
+namoid plugin update claude --dry-run
+namoid plugin uninstall codex
+```
+
+Mutating commands prompt by default. Use `--yes` only for an intentional
+non-interactive run. `--json` returns the stable schema used by automation, and
+`--plain` keeps output decoration-free.
