@@ -1,0 +1,115 @@
+import process from "node:process";
+import path from "node:path";
+import { diagnoseProject, inspectProject } from "./project.js";
+
+const VERSION = "0.1.0";
+
+function parseArgs(argv) {
+  const flags = { json: false, dryRun: false, cwd: process.cwd() };
+  const positional = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--json") flags.json = true;
+    else if (arg === "--dry-run") flags.dryRun = true;
+    else if (arg === "--cwd") {
+      index += 1;
+      if (!argv[index]) throw new Error("--cwd requires a directory");
+      flags.cwd = path.resolve(argv[index]);
+    } else positional.push(arg);
+  }
+  return { command: positional[0] ?? "help", flags };
+}
+
+function jsonOutput(command, ok, result) {
+  process.stdout.write(`${JSON.stringify({ schemaVersion: 1, command, ok, result }, null, 2)}\n`);
+}
+
+function printHelp() {
+  process.stdout.write(`NamoID CLI ${VERSION}\n\n`);
+  process.stdout.write("Usage: namoid <command> [options]\n\n");
+  process.stdout.write("Commands:\n");
+  process.stdout.write("  detect            Detect the local application and NamoID SDK\n");
+  process.stdout.write("  doctor            Diagnose the local NamoID integration\n");
+  process.stdout.write("  init --dry-run     Preview the onboarding plan without making changes\n");
+  process.stdout.write("\nOptions:\n");
+  process.stdout.write("  --cwd <directory>  Inspect another application directory\n");
+  process.stdout.write("  --json             Print versioned machine-readable output\n");
+  process.stdout.write("  --dry-run          Preview actions without changing anything\n");
+}
+
+function printDetection(project) {
+  process.stdout.write(`Application: ${project.packageName ?? "unknown"}\n`);
+  process.stdout.write(`Framework: ${project.framework}\n`);
+  process.stdout.write(`NamoID SDK: ${project.sdkPackages.map((item) => `${item.name} ${item.version}`).join(", ") || "not found"}\n`);
+  process.stdout.write(`Callback route: ${project.callbackCandidates[0] ?? "not found"}\n`);
+}
+
+function printDoctor(result) {
+  for (const item of result.checks) {
+    const marker = item.status === "pass" ? "✓" : item.status === "warn" ? "!" : "✗";
+    process.stdout.write(`${marker} ${item.message}\n`);
+    if (item.remediation && item.status !== "pass") process.stdout.write(`  ${item.remediation}\n`);
+  }
+  process.stdout.write(`\n${result.summary.passed} passed, ${result.summary.warnings} warnings, ${result.summary.failed} failed\n`);
+}
+
+export async function run(argv) {
+  const { command, flags } = parseArgs(argv);
+  if (command === "help" || command === "--help" || command === "-h") {
+    printHelp();
+    return;
+  }
+  if (command === "--version" || command === "-v" || command === "version") {
+    process.stdout.write(`${VERSION}\n`);
+    return;
+  }
+
+  const project = await inspectProject(flags.cwd);
+  if (command === "detect") {
+    if (flags.json) jsonOutput(command, true, project);
+    else printDetection(project);
+    return;
+  }
+  if (command === "doctor") {
+    const result = diagnoseProject(project);
+    const ok = result.summary.failed === 0;
+    if (flags.json) jsonOutput(command, ok, result);
+    else printDoctor(result);
+    if (!ok) process.exitCode = 1;
+    return;
+  }
+  if (command === "init") {
+    if (!flags.dryRun) {
+      const result = { code: "authentication_required", message: "Authenticated onboarding is not enabled in this foundation release. Run with --dry-run to preview it." };
+      if (flags.json) jsonOutput(command, false, result);
+      else process.stderr.write(`${result.message}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    const diagnosis = diagnoseProject(project);
+    const result = {
+      mode: "dry-run",
+      detection: { framework: project.framework, packageName: project.packageName },
+      proposedActions: [
+        "Authenticate with NamoID using Authorization Code + PKCE",
+        "Select or create a workspace and project",
+        "Select the Test environment",
+        "Select or create an application",
+        "Register exact callback and logout URLs",
+        "Install the supported NamoID SDK",
+        "Preview local configuration changes",
+        "Run the Hosted Auth readiness checks",
+      ],
+      diagnosis,
+    };
+    if (flags.json) jsonOutput(command, true, result);
+    else {
+      printDetection(project);
+      process.stdout.write("\nDry run — no files or NamoID configuration will change.\n");
+      result.proposedActions.forEach((action, index) => process.stdout.write(`${index + 1}. ${action}\n`));
+    }
+    return;
+  }
+
+  throw new Error(`Unknown command: ${command}`);
+}
