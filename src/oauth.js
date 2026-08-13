@@ -35,6 +35,29 @@ function requireUrl(metadata, name) {
   return parsed.toString();
 }
 
+export async function discoverProtectedResource(metadataUrl, fetchImpl = fetch) {
+  const requestedUrl = requireUrl({ metadata_url: metadataUrl }, "metadata_url");
+  const response = await fetchImpl(requestedUrl, {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`Protected resource discovery failed with HTTP ${response.status}`);
+  }
+  const metadata = await response.json();
+  const resource = requireUrl(metadata, "resource");
+  if (!Array.isArray(metadata.authorization_servers) || metadata.authorization_servers.length === 0) {
+    throw new Error("Protected resource metadata is missing authorization_servers");
+  }
+  const authorizationServers = metadata.authorization_servers.map((issuer) => normalizeIssuer(issuer));
+  return {
+    resource,
+    authorizationServers,
+    scopesSupported: Array.isArray(metadata.scopes_supported)
+      ? metadata.scopes_supported.filter((scope) => typeof scope === "string")
+      : [],
+  };
+}
+
 export async function discoverAuthorizationServer(issuer, fetchImpl = fetch) {
   const expectedIssuer = normalizeIssuer(issuer);
   const response = await fetchImpl(`${expectedIssuer}/.well-known/openid-configuration`, {

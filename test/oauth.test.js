@@ -5,9 +5,38 @@ import {
   createOAuthState,
   createPkce,
   discoverAuthorizationServer,
+  discoverProtectedResource,
   exchangeAuthorizationCode,
   registerPublicClient,
 } from "../src/oauth.js";
+
+test("discovers the Setup Assistant resource and its least-privilege scopes", async () => {
+  const metadata = await discoverProtectedResource(
+    "https://api.namoid.in/.well-known/oauth-protected-resource/v1/setup/mcp",
+    async () => new Response(JSON.stringify({
+      resource: "https://api.namoid.in/v1/setup/mcp",
+      authorization_servers: ["https://auth.namoid.in"],
+      scopes_supported: ["setup.read", "setup.write"],
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  );
+
+  assert.equal(metadata.resource, "https://api.namoid.in/v1/setup/mcp");
+  assert.deepEqual(metadata.authorizationServers, ["https://auth.namoid.in"]);
+  assert.deepEqual(metadata.scopesSupported, ["setup.read", "setup.write"]);
+});
+
+test("rejects protected-resource metadata without an authorization server", async () => {
+  await assert.rejects(
+    discoverProtectedResource(
+      "https://api.namoid.in/.well-known/oauth-protected-resource/v1/setup/mcp",
+      async () => new Response(JSON.stringify({
+        resource: "https://api.namoid.in/v1/setup/mcp",
+        authorization_servers: [],
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    ),
+    /missing authorization_servers/,
+  );
+});
 
 test("creates PKCE S256 values with sufficient entropy", () => {
   const first = createPkce();

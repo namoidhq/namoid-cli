@@ -19,9 +19,10 @@ Authenticated setup and repository mutation remain intentionally unavailable
 until the CLI OAuth client, shared management endpoints, atomic edit plan, and
 Live-environment authorization boundary are complete.
 
-The internal OAuth foundation validates issuer discovery, requires PKCE S256,
-supports loopback redirects, and exchanges authorization codes without a
-client secret. The CLI uses the same Setup Assistant MCP resource and
+The internal OAuth foundation discovers the protected MCP resource and its
+authorization server, validates issuer discovery, requires PKCE S256, supports
+loopback redirects, and exchanges authorization codes without a client secret.
+The CLI uses the same Setup Assistant MCP resource and
 `setup.read` / `setup.write` authorization model as AI MCP clients. It is not
 exposed as `namoid login` until loopback interoperability and operating-system
 credential storage are complete.
