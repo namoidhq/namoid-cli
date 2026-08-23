@@ -2,27 +2,30 @@ function action(id, description, details = {}) {
   return { id, description, ...details };
 }
 
-export function buildOnboardingPlan(project, diagnosis) {
+export function buildOnboardingPlan(project, diagnosis, target = {}) {
   const actions = [
     action("auth.login", "Authenticate with NamoID using Authorization Code + PKCE", {
       target: "namoid",
-      available: false,
+      available: true,
     }),
     action("remote.workspace", "Select or create a Customer Identity workspace", {
       target: "namoid",
       available: false,
+      selectedId: target.tenantId ?? null,
     }),
     action("remote.project", "Select or create a project", {
       target: "namoid",
       available: false,
+      selectedId: target.projectId ?? null,
     }),
     action("remote.environment", "Select the Test environment", {
       target: "namoid",
       available: false,
+      selectedId: target.environmentId ?? null,
     }),
     action("remote.application", "Select or create an application", {
       target: "namoid",
-      available: false,
+      available: true,
     }),
   ];
 
@@ -46,7 +49,19 @@ export function buildOnboardingPlan(project, diagnosis) {
   actions.push(
     action("remote.redirects", "Register exact callback and post-logout URLs", {
       target: "namoid",
-      available: false,
+      available: true,
+    }),
+    action("mcp.host.detect", "Detect a supported AI host", {
+      target: "local",
+      available: true,
+    }),
+    action("mcp.server.configure", "Configure the canonical NamoID MCP server", {
+      target: "ai-host",
+      available: true,
+    }),
+    action("mcp.oauth.authorize", "Authorize NamoID MCP using the AI host's OAuth flow", {
+      target: "ai-host",
+      available: true,
     }),
     action("local.environment", "Preview local environment configuration", {
       target: "repository",
@@ -67,6 +82,11 @@ export function buildOnboardingPlan(project, diagnosis) {
     schemaVersion: 1,
     mode: "dry-run",
     defaults: { environment: "test" },
+    target: {
+      tenantId: target.tenantId ?? null,
+      projectId: target.projectId ?? null,
+      environmentId: target.environmentId ?? null,
+    },
     detection: { framework: project.framework, packageName: project.packageName },
     actions,
     diagnosis,

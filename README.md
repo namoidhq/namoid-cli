@@ -25,13 +25,24 @@ Requires Node.js 20 or newer.
 
 ## Commands
 
-Project inspection and planning commands are read-only. AI setup installs a
-verified host plugin but does not modify the inspected application:
+Start from the application repository with one command. `init` signs in when
+needed, detects the local setup, creates the NamoID Application after one
+confirmation, and connects a supported AI host to NamoID MCP:
 
 ```bash
-node ./bin/namoid.js detect
-node ./bin/namoid.js doctor
-node ./bin/namoid.js init --dry-run
+npx @namoidhq/cli init --tenant <workspace-id> --project <project-id> --environment <environment-id>
+```
+
+Detection, diagnostics, previews, and optional session controls remain
+available independently:
+
+```bash
+namoid detect
+namoid doctor
+namoid init --dry-run --tenant <workspace-id> --project <project-id> --environment <environment-id>
+namoid login
+namoid whoami
+namoid logout
 node ./bin/namoid.js doctor --json
 node ./bin/namoid.js ai setup codex --dry-run
 node ./bin/namoid.js ai setup claude --dry-run
@@ -45,10 +56,24 @@ It detects supported frameworks, installed NamoID SDKs, callback routes, and
 required environment-variable names. It never prints environment-variable
 values.
 
-The CLI does not implement a second MCP or OAuth client. After verified plugin
-installation, Codex or Claude owns browser authorization, token handling, and
-the Setup Assistant MCP connection. This keeps one authorization path per host
-and prevents duplicated credential storage in the CLI.
+`namoid init` is the recommended first command. It detects the framework,
+package name, dev port, callback route, SDK, and the active Codex or Claude Code
+host. When no CLI session exists it opens browser login automatically. After
+login, it asks for the Application name and clearly identifies that name as
+public on hosted sign-in and consent screens. The detected package name is only
+a suggested default. After one confirmation it creates the Application, configures
+`https://mcp.namoid.in` in the detected AI host, and starts that host's OAuth
+login. Non-interactive runs must provide `--name`. Use `--mcp-host none` when
+only Application setup is wanted.
+
+The CLI is an OAuth public native client. `namoid login` opens the system
+browser, uses Authorization Code with S256 PKCE, and receives the callback on a
+random loopback port. It has no client secret. Rotating tokens are stored in the
+current user's private NamoID configuration directory with owner-only file
+permissions and are revoked by `namoid logout`.
+
+AI host plugins remain separate OAuth clients owned by Codex or Claude; the CLI
+does not copy or share their credentials.
 
 Host plugins live in separate repositories. The CLI installs only immutable
 releases pinned to an exact Git commit and deterministic archive SHA-256; it
