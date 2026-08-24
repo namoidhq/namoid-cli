@@ -10,17 +10,17 @@ export function buildOnboardingPlan(project, diagnosis, target = {}) {
     }),
     action("remote.workspace", "Select or create a Customer Identity workspace", {
       target: "namoid",
-      available: false,
+      available: true,
       selectedId: target.tenantId ?? null,
     }),
     action("remote.project", "Select or create a project", {
       target: "namoid",
-      available: false,
+      available: true,
       selectedId: target.projectId ?? null,
     }),
     action("remote.environment", "Select the Test environment", {
       target: "namoid",
-      available: false,
+      available: true,
       selectedId: target.environmentId ?? null,
     }),
     action("remote.application", "Select or create an application", {

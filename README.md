@@ -30,8 +30,15 @@ needed, detects the local setup, creates the NamoID Application after one
 confirmation, and connects a supported AI host to NamoID MCP:
 
 ```bash
-npx @namoidhq/cli init --tenant <workspace-id> --project <project-id> --environment <environment-id>
+npx @namoidhq/cli init
 ```
+
+After browser sign-in, the CLI loads the workspaces and projects available to
+the signed-in account and asks which human-readable destination to use. When no
+suitable workspace or project exists, `init` offers to create it and uses its
+Test environment automatically. UUID flags remain optional overrides for CI or
+other non-interactive automation; people do not need to copy identifiers from
+the Console.
 
 Detection, diagnostics, previews, and optional session controls remain
 available independently:
@@ -39,7 +46,7 @@ available independently:
 ```bash
 namoid detect
 namoid doctor
-namoid init --dry-run --tenant <workspace-id> --project <project-id> --environment <environment-id>
+namoid init --dry-run
 namoid login
 namoid whoami
 namoid logout

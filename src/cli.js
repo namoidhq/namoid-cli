@@ -8,6 +8,7 @@ import { detectPreferredMcpHost, setupAndAuthorizeMcp } from "./mcp-setup.js";
 import { diagnoseProject, inspectProject } from "./project.js";
 import { buildOnboardingPlan } from "./planner.js";
 import { detectApplicationSetup } from "./setup-detection.js";
+import { resolveInitTarget } from "./target.js";
 import { HOST_PLUGINS, pluginPlan, resolveHost } from "./plugins.js";
 import { detectHost, hostPluginStatus, installHostPlugin, uninstallHostPlugin, updateHostPlugin } from "./plugin-installer.js";
 
@@ -67,14 +68,14 @@ function printHelp() {
   process.stdout.write("  whoami            Show the signed-in NamoID account\n");
   process.stdout.write("  detect            Detect the local application and NamoID SDK\n");
   process.stdout.write("  doctor            Diagnose the local NamoID integration\n");
-  process.stdout.write("  init              Create the target environment's first application\n");
+  process.stdout.write("  init              Select or create a workspace and configure your application\n");
   process.stdout.write("  setup [host]       Detect hosts or install a verified plugin\n");
   process.stdout.write("  plugin <action>    Install, update, uninstall, list, or inspect status\n");
   process.stdout.write("\nOptions:\n");
   process.stdout.write("  --cwd <directory>  Inspect another application directory\n");
-  process.stdout.write("  --tenant <id>      Scope the plan to a Console workspace\n");
-  process.stdout.write("  --project <id>     Scope the plan to a Console project\n");
-  process.stdout.write("  --environment <id> Scope the plan to a Console environment\n");
+  process.stdout.write("  --tenant <id>      Optional workspace override for automation\n");
+  process.stdout.write("  --project <id>     Optional project override for automation\n");
+  process.stdout.write("  --environment <id> Optional environment override for automation\n");
   process.stdout.write("  --name <name>       Application name (defaults to package name)\n");
   process.stdout.write("  --type <type>       Application type: web, spa, or native\n");
   process.stdout.write("  --redirect-uri <url> Exact application OAuth callback URL\n");
@@ -98,6 +99,55 @@ async function confirmMutation(message, flags) {
   } finally {
     terminal.close();
   }
+}
+
+function createInteractivePrompt(flags) {
+  const output = flags.json ? process.stderr : process.stdout;
+
+  function requireTerminal() {
+    if (!process.stdin.isTTY || !output.isTTY) {
+      throw new Error(
+        "Workspace selection requires an interactive terminal. For automation, provide --tenant, --project, and --environment.",
+      );
+    }
+  }
+
+  return {
+    async select(message, choices) {
+      requireTerminal();
+      output.write(`\n${message}:\n`);
+      choices.forEach((choice, index) => output.write(`  ${index + 1}. ${choice.label}\n`));
+      const terminal = createInterface({ input: process.stdin, output });
+      try {
+        while (true) {
+          const answer = await terminal.question("Choose an option [1]: ");
+          const selectedIndex = answer.trim() === "" ? 0 : Number(answer.trim()) - 1;
+          if (Number.isInteger(selectedIndex) && choices[selectedIndex]) {
+            return choices[selectedIndex].value;
+          }
+          output.write(`Enter a number from 1 to ${choices.length}.\n`);
+        }
+      } finally {
+        terminal.close();
+      }
+    },
+    async text(message, defaultValue) {
+      requireTerminal();
+      const terminal = createInterface({ input: process.stdin, output });
+      try {
+        const answer = await terminal.question(`${message}${defaultValue ? ` [${defaultValue}]` : ""}: `);
+        const value = answer.trim() || defaultValue;
+        if (!value?.trim()) throw new Error(`${message} is required.`);
+        if (value.length > 256) throw new Error(`${message} must be 256 characters or fewer.`);
+        return value.trim();
+      } finally {
+        terminal.close();
+      }
+    },
+    note(message) {
+      if (!flags.json) output.write(`${message}\n`);
+    },
+  };
 }
 
 async function resolvePublicApplicationName(detected, flags) {
@@ -285,22 +335,42 @@ export async function run(argv) {
       }
       return;
     }
-    const target = result.target;
-    if (!target.tenantId || !target.projectId || !target.environmentId) {
-      throw new Error("Authenticated init requires --tenant, --project, and --environment from the Console setup page.");
-    }
-    detected = await resolvePublicApplicationName(detected, flags);
-    result.proposal.application = detected;
+    let token;
     try {
-      await accessToken(config);
+      token = await accessToken(config);
     } catch (error) {
       if (!(error instanceof Error) || !/Run `namoid login`/.test(error.message)) throw error;
       const output = flags.json ? process.stderr : process.stdout;
       output.write("Opening your browser to sign in to NamoID…\n");
       await login(config);
+      token = await accessToken(config);
     }
+    const target = await resolveInitTarget(
+      config,
+      {
+        tenantId: flags.tenant,
+        projectId: flags.project,
+        environmentId: flags.environment,
+      },
+      {
+        accessToken: token,
+        prompt: createInteractivePrompt(flags),
+        suggestedProjectName: detected.name,
+      },
+    );
+    result.target = {
+      tenantId: target.tenantId,
+      projectId: target.projectId,
+      environmentId: target.environmentId,
+    };
+    detected = await resolvePublicApplicationName(detected, flags);
+    result.proposal.application = detected;
     if (!flags.json) {
       printDetection(project);
+      process.stdout.write("\nSelected NamoID destination:\n");
+      process.stdout.write(`- Workspace: ${target.labels.workspace}\n`);
+      process.stdout.write(`- Project: ${target.labels.project}\n`);
+      process.stdout.write(`- Environment: ${target.labels.environment}\n`);
       process.stdout.write("\nDetected setup:\n");
       process.stdout.write(`- Application: ${detected.name} (${detected.applicationType})\n`);
       process.stdout.write(`- Callback: ${detected.redirectUri}\n`);
@@ -311,16 +381,21 @@ export async function run(argv) {
       : `Create ${detected.name} in the selected NamoID environment?`;
     const approved = await confirmMutation(mutation, flags);
     if (!approved) return;
-    const application = await createApplication(config, target, {
-      name: detected.name,
-      application_type: detected.applicationType,
-      redirect_uris: [detected.redirectUri],
-      post_logout_redirect_uris: [detected.postLogoutRedirectUri],
-      allowed_web_origins: [detected.origin],
-      default_return_to: detected.redirectUri,
-      allowed_scopes: ["openid", "profile", "email", "offline_access"],
-      trusted: true,
-    });
+    const application = await createApplication(
+      config,
+      target,
+      {
+        name: detected.name,
+        application_type: detected.applicationType,
+        redirect_uris: [detected.redirectUri],
+        post_logout_redirect_uris: [detected.postLogoutRedirectUri],
+        allowed_web_origins: [detected.origin],
+        default_return_to: detected.redirectUri,
+        allowed_scopes: ["openid", "profile", "email", "offline_access"],
+        trusted: true,
+      },
+      { accessToken: token },
+    );
     let mcp = { configured: false, reason: "host_not_detected" };
     if (mcpHost) {
       try {
