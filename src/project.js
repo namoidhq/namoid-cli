@@ -104,6 +104,15 @@ function detectFramework(dependencies) {
   return "unknown";
 }
 
+function detectDevPort(pkg) {
+  const scripts = Object.values(pkg?.scripts ?? {}).filter((value) => typeof value === "string");
+  for (const script of scripts) {
+    const match = script.match(/(?:--port|-p)\s*(?:=\s*)?(\d{2,5})\b/);
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
+
 async function detectPackageManager(root, pkg) {
   if (typeof pkg?.packageManager === "string") return pkg.packageManager.split("@")[0];
   const candidates = [
@@ -171,6 +180,8 @@ export async function inspectProject(root) {
     packageJson: pkg ? "package.json" : null,
     packageName: typeof pkg?.name === "string" ? pkg.name : null,
     framework,
+    usesVite: Boolean(dependencies.vite),
+    devPort: detectDevPort(pkg),
     packageManager,
     sdkPackages,
     callbackCandidates,

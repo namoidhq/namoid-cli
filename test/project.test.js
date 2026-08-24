@@ -14,6 +14,7 @@ test("detects a configured Next.js application without reading values", async ()
   await writeFile(path.join(root, "package.json"), JSON.stringify({
     name: "acme-web",
     packageManager: "pnpm@10.20.0",
+    scripts: { dev: "next dev -p 4100" },
     dependencies: { next: "15.5.0", react: "19.0.0", "@namoidhq/nextjs": "4.0.0" },
   }));
   await writeFile(path.join(root, ".env.local"), [
@@ -31,6 +32,7 @@ test("detects a configured Next.js application without reading values", async ()
 
   assert.equal(project.framework, "nextjs");
   assert.equal(project.packageManager, "pnpm");
+  assert.equal(project.devPort, 4100);
   assert.deepEqual(project.callbackCandidates, ["app/api/auth/callback/route.ts"]);
   assert.ok(project.envNames.includes("NAMOID_CLIENT_SECRET"));
   assert.equal(JSON.stringify(project).includes("must-not-leak"), false);

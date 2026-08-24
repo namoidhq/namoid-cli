@@ -1,15 +1,38 @@
 import process from "node:process";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
+import { createApplication } from "./api.js";
+import { cliConfig } from "./config.js";
+import { accessToken, login, logout, userInfo } from "./oauth.js";
+import { detectPreferredMcpHost, setupAndAuthorizeMcp } from "./mcp-setup.js";
 import { diagnoseProject, inspectProject } from "./project.js";
 import { buildOnboardingPlan } from "./planner.js";
+import { detectApplicationSetup } from "./setup-detection.js";
+import { resolveInitTarget } from "./target.js";
 import { HOST_PLUGINS, pluginPlan, resolveHost } from "./plugins.js";
 import { detectHost, hostPluginStatus, installHostPlugin, uninstallHostPlugin, updateHostPlugin } from "./plugin-installer.js";
 
 const VERSION = "0.1.0";
 
 function parseArgs(argv) {
-  const flags = { json: false, dryRun: false, yes: false, plain: false, cwd: process.cwd() };
+  const flags = {
+    json: false,
+    dryRun: false,
+    yes: false,
+    plain: false,
+    cwd: process.cwd(),
+    tenant: null,
+    project: null,
+    environment: null,
+    issuer: null,
+    apiBase: null,
+    clientId: null,
+    name: null,
+    applicationType: null,
+    redirectUri: null,
+    postLogoutRedirectUri: null,
+    mcpHost: "auto",
+  };
   const positional = [];
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -21,6 +44,12 @@ function parseArgs(argv) {
       index += 1;
       if (!argv[index]) throw new Error("--cwd requires a directory");
       flags.cwd = path.resolve(argv[index]);
+    } else if (["--tenant", "--project", "--environment", "--issuer", "--api-base", "--client-id", "--name", "--type", "--redirect-uri", "--post-logout-redirect-uri", "--mcp-host"].includes(arg)) {
+      index += 1;
+      if (!argv[index]) throw new Error(`${arg} requires a value`);
+      const key = arg.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+      if (key === "type") flags.applicationType = argv[index];
+      else flags[key] = argv[index];
     } else positional.push(arg);
   }
   return { command: positional[0] ?? "help", args: positional.slice(1), flags };
@@ -34,13 +63,25 @@ function printHelp() {
   process.stdout.write(`NamoID CLI ${VERSION}\n\n`);
   process.stdout.write("Usage: namoid <command> [options]\n\n");
   process.stdout.write("Commands:\n");
+  process.stdout.write("  login             Sign in securely in the system browser\n");
+  process.stdout.write("  logout            Revoke the CLI session and remove local tokens\n");
+  process.stdout.write("  whoami            Show the signed-in NamoID account\n");
   process.stdout.write("  detect            Detect the local application and NamoID SDK\n");
   process.stdout.write("  doctor            Diagnose the local NamoID integration\n");
-  process.stdout.write("  init --dry-run     Preview the onboarding plan without making changes\n");
+  process.stdout.write("  init              Select or create a workspace and configure your application\n");
   process.stdout.write("  setup [host]       Detect hosts or install a verified plugin\n");
   process.stdout.write("  plugin <action>    Install, update, uninstall, list, or inspect status\n");
   process.stdout.write("\nOptions:\n");
   process.stdout.write("  --cwd <directory>  Inspect another application directory\n");
+  process.stdout.write("  --tenant <id>      Optional workspace override for automation\n");
+  process.stdout.write("  --project <id>     Optional project override for automation\n");
+  process.stdout.write("  --environment <id> Optional environment override for automation\n");
+  process.stdout.write("  --name <name>       Application name (defaults to package name)\n");
+  process.stdout.write("  --type <type>       Application type: web, spa, or native\n");
+  process.stdout.write("  --redirect-uri <url> Exact application OAuth callback URL\n");
+  process.stdout.write("  --issuer <url>      Override the NamoID OAuth issuer\n");
+  process.stdout.write("  --api-base <url>    Override the NamoID management API\n");
+  process.stdout.write("  --mcp-host <host>   AI host: auto, codex, claude, or none\n");
   process.stdout.write("  --json             Print versioned machine-readable output\n");
   process.stdout.write("  --dry-run          Preview actions without changing anything\n");
   process.stdout.write("  --yes, -y          Skip mutation confirmation\n");
@@ -49,11 +90,82 @@ function printHelp() {
 
 async function confirmMutation(message, flags) {
   if (flags.yes) return true;
-  if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error(`${message} Re-run with --yes in a non-interactive environment.`);
-  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  const output = flags.json ? process.stderr : process.stdout;
+  if (!process.stdin.isTTY || !output.isTTY) throw new Error(`${message} Re-run with --yes in a non-interactive environment.`);
+  const terminal = createInterface({ input: process.stdin, output });
   try {
     const answer = await terminal.question(`${message} [y/N] `);
     return /^(y|yes)$/i.test(answer.trim());
+  } finally {
+    terminal.close();
+  }
+}
+
+function createInteractivePrompt(flags) {
+  const output = flags.json ? process.stderr : process.stdout;
+
+  function requireTerminal() {
+    if (!process.stdin.isTTY || !output.isTTY) {
+      throw new Error(
+        "Workspace selection requires an interactive terminal. For automation, provide --tenant, --project, and --environment.",
+      );
+    }
+  }
+
+  return {
+    async select(message, choices) {
+      requireTerminal();
+      output.write(`\n${message}:\n`);
+      choices.forEach((choice, index) => output.write(`  ${index + 1}. ${choice.label}\n`));
+      const terminal = createInterface({ input: process.stdin, output });
+      try {
+        while (true) {
+          const answer = await terminal.question("Choose an option [1]: ");
+          const selectedIndex = answer.trim() === "" ? 0 : Number(answer.trim()) - 1;
+          if (Number.isInteger(selectedIndex) && choices[selectedIndex]) {
+            return choices[selectedIndex].value;
+          }
+          output.write(`Enter a number from 1 to ${choices.length}.\n`);
+        }
+      } finally {
+        terminal.close();
+      }
+    },
+    async text(message, defaultValue) {
+      requireTerminal();
+      const terminal = createInterface({ input: process.stdin, output });
+      try {
+        const answer = await terminal.question(`${message}${defaultValue ? ` [${defaultValue}]` : ""}: `);
+        const value = answer.trim() || defaultValue;
+        if (!value?.trim()) throw new Error(`${message} is required.`);
+        if (value.length > 256) throw new Error(`${message} must be 256 characters or fewer.`);
+        return value.trim();
+      } finally {
+        terminal.close();
+      }
+    },
+    note(message) {
+      if (!flags.json) output.write(`${message}\n`);
+    },
+  };
+}
+
+async function resolvePublicApplicationName(detected, flags) {
+  if (flags.name) return detected;
+  if (!process.stdin.isTTY || (!process.stdout.isTTY && !flags.json)) {
+    throw new Error(
+      "--name is required in a non-interactive run because the Application name is shown publicly.",
+    );
+  }
+  const output = flags.json ? process.stderr : process.stdout;
+  const terminal = createInterface({ input: process.stdin, output });
+  try {
+    const answer = await terminal.question(
+      `Application name (shown publicly on sign-in and consent screens) [${detected.name}]: `,
+    );
+    const name = answer.trim() || detected.name;
+    if (name.length > 256) throw new Error("Application name must be 256 characters or fewer.");
+    return { ...detected, name };
   } finally {
     terminal.close();
   }
@@ -117,12 +229,39 @@ function printDoctor(result) {
 
 export async function run(argv) {
   const { command, args, flags } = parseArgs(argv);
+  const config = cliConfig({ issuer: flags.issuer, apiBase: flags.apiBase, clientId: flags.clientId });
   if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
     return;
   }
   if (command === "--version" || command === "-v" || command === "version") {
     process.stdout.write(`${VERSION}\n`);
+    return;
+  }
+
+  if (command === "login") {
+    if (flags.json) process.stderr.write("Opening your browser to sign in to NamoID…\n");
+    else process.stdout.write("Opening your browser to sign in to NamoID…\n");
+    await login(config);
+    const profile = await userInfo(config);
+    const result = { signedIn: true, user: { id: profile.sub, email: profile.email ?? null, name: profile.name ?? null } };
+    if (flags.json) jsonOutput(command, true, result);
+    else process.stdout.write(`Signed in${profile.email ? ` as ${profile.email}` : ""}.\n`);
+    return;
+  }
+
+  if (command === "logout") {
+    await logout(config);
+    if (flags.json) jsonOutput(command, true, { signedIn: false });
+    else process.stdout.write("Signed out of NamoID.\n");
+    return;
+  }
+
+  if (command === "whoami") {
+    const profile = await userInfo(config);
+    const result = { id: profile.sub, email: profile.email ?? null, name: profile.name ?? null };
+    if (flags.json) jsonOutput(command, true, result);
+    else process.stdout.write(`${profile.email ?? profile.name ?? profile.sub}\n`);
     return;
   }
 
@@ -172,20 +311,115 @@ export async function run(argv) {
     return;
   }
   if (command === "init") {
-    if (!flags.dryRun) {
-      const result = { code: "authentication_required", message: "Authenticated onboarding is not enabled in this foundation release. Run with --dry-run to preview it." };
-      if (flags.json) jsonOutput(command, false, result);
-      else process.stderr.write(`${result.message}\n`);
-      process.exitCode = 2;
+    const diagnosis = diagnoseProject(project);
+    const result = buildOnboardingPlan(project, diagnosis, {
+      tenantId: flags.tenant,
+      projectId: flags.project,
+      environmentId: flags.environment,
+    });
+    let detected = detectApplicationSetup(project, flags);
+    const mcpHost = detectPreferredMcpHost({ requested: flags.mcpHost });
+    result.proposal = {
+      application: detected,
+      mcpHost: mcpHost?.host ?? null,
+    };
+    if (flags.dryRun) {
+      if (flags.json) jsonOutput(command, true, result);
+      else {
+        printDetection(project);
+        process.stdout.write("\nDry run — no files or NamoID configuration will change.\n");
+        process.stdout.write(`Application: ${detected.name} (${detected.applicationType})\n`);
+        process.stdout.write(`Callback: ${detected.redirectUri}\n`);
+        process.stdout.write(`AI host: ${mcpHost?.displayName ?? "not detected"}\n\n`);
+        result.actions.forEach((item, index) => process.stdout.write(`${index + 1}. ${item.description}\n`));
+      }
       return;
     }
-    const diagnosis = diagnoseProject(project);
-    const result = buildOnboardingPlan(project, diagnosis);
-    if (flags.json) jsonOutput(command, true, result);
-    else {
+    let token;
+    try {
+      token = await accessToken(config);
+    } catch (error) {
+      if (!(error instanceof Error) || !/Run `namoid login`/.test(error.message)) throw error;
+      const output = flags.json ? process.stderr : process.stdout;
+      output.write("Opening your browser to sign in to NamoID…\n");
+      await login(config);
+      token = await accessToken(config);
+    }
+    const target = await resolveInitTarget(
+      config,
+      {
+        tenantId: flags.tenant,
+        projectId: flags.project,
+        environmentId: flags.environment,
+      },
+      {
+        accessToken: token,
+        prompt: createInteractivePrompt(flags),
+        suggestedProjectName: detected.name,
+      },
+    );
+    result.target = {
+      tenantId: target.tenantId,
+      projectId: target.projectId,
+      environmentId: target.environmentId,
+    };
+    detected = await resolvePublicApplicationName(detected, flags);
+    result.proposal.application = detected;
+    if (!flags.json) {
       printDetection(project);
-      process.stdout.write("\nDry run — no files or NamoID configuration will change.\n");
-      result.actions.forEach((item, index) => process.stdout.write(`${index + 1}. ${item.description}\n`));
+      process.stdout.write("\nSelected NamoID destination:\n");
+      process.stdout.write(`- Workspace: ${target.labels.workspace}\n`);
+      process.stdout.write(`- Project: ${target.labels.project}\n`);
+      process.stdout.write(`- Environment: ${target.labels.environment}\n`);
+      process.stdout.write("\nDetected setup:\n");
+      process.stdout.write(`- Application: ${detected.name} (${detected.applicationType})\n`);
+      process.stdout.write(`- Callback: ${detected.redirectUri}\n`);
+      process.stdout.write(`- AI host: ${mcpHost?.displayName ?? "not detected; MCP setup will be skipped"}\n`);
+    }
+    const mutation = mcpHost
+      ? `Create ${detected.name} and configure NamoID MCP for ${mcpHost.displayName}?`
+      : `Create ${detected.name} in the selected NamoID environment?`;
+    const approved = await confirmMutation(mutation, flags);
+    if (!approved) return;
+    const application = await createApplication(
+      config,
+      target,
+      {
+        name: detected.name,
+        application_type: detected.applicationType,
+        redirect_uris: [detected.redirectUri],
+        post_logout_redirect_uris: [detected.postLogoutRedirectUri],
+        allowed_web_origins: [detected.origin],
+        default_return_to: detected.redirectUri,
+        allowed_scopes: ["openid", "profile", "email", "offline_access"],
+        trusted: true,
+      },
+      { accessToken: token },
+    );
+    let mcp = { configured: false, reason: "host_not_detected" };
+    if (mcpHost) {
+      try {
+        const stdio = flags.json ? ["inherit", process.stderr, process.stderr] : "inherit";
+        mcp = setupAndAuthorizeMcp(mcpHost, { stdio });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(`Application created, but ${mcpHost.displayName} MCP setup did not finish: ${message}\n`);
+        mcp = { configured: false, reason: "host_setup_failed", host: mcpHost.host };
+      }
+    }
+    const created = {
+      applicationId: application.id,
+      clientId: application.client_id,
+      name: application.name,
+      redirectUris: application.redirect_uris,
+      replayed: application.idempotency_replayed,
+      mcp,
+    };
+    if (flags.json) jsonOutput(command, true, created);
+    else {
+      const outcome = created.replayed ? "Application already ready" : "Created";
+      process.stdout.write(`\n${outcome}: ${created.name}.\nClient ID: ${created.clientId}\n`);
+      if (created.mcp.configured) process.stdout.write(`NamoID MCP is connected for ${mcpHost.displayName}.\n`);
     }
     return;
   }

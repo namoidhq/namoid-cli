@@ -19,3 +19,21 @@ test("uses Test by default and exposes stable action identifiers", () => {
   assert.ok(plan.actions.some((item) => item.id === "local.callback.create"));
   assert.equal(plan.actions.find((item) => item.id === "validation.doctor").available, true);
 });
+
+test("keeps Console resource scope in the deterministic plan", () => {
+  const project = {
+    framework: "nextjs",
+    packageName: "acme",
+    sdkPackages: [],
+    callbackCandidates: [],
+  };
+  const diagnosis = { summary: { passed: 1, warnings: 0, failed: 0 }, checks: [] };
+  const target = { tenantId: "tenant-1", projectId: "project-1", environmentId: "env-1" };
+
+  const plan = buildOnboardingPlan(project, diagnosis, target);
+
+  assert.deepEqual(plan.target, target);
+  assert.equal(plan.actions.find((item) => item.id === "remote.workspace").selectedId, "tenant-1");
+  assert.equal(plan.actions.find((item) => item.id === "remote.project").selectedId, "project-1");
+  assert.equal(plan.actions.find((item) => item.id === "remote.environment").selectedId, "env-1");
+});
