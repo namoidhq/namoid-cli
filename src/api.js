@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { accessToken } from "./oauth.js";
-
-const CLI_VERSION = "0.1.0";
+import { CLI_VERSION } from "./version.js";
 
 async function managementRequest(config, path, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;

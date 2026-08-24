@@ -47,7 +47,7 @@ test("sends CLI identity and idempotency headers when creating an Application", 
   );
 
   assert.equal(request.options.headers["Idempotency-Key"], applicationIdempotencyKey(target, body));
-  assert.equal(request.options.headers["User-Agent"], "@namoidhq/cli/0.1.0");
+  assert.equal(request.options.headers["User-Agent"], "@namoidhq/cli/0.2.0");
   assert.equal(result.idempotency_replayed, true);
 });
 

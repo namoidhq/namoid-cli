@@ -11,8 +11,7 @@ import { detectApplicationSetup } from "./setup-detection.js";
 import { resolveInitTarget } from "./target.js";
 import { HOST_PLUGINS, pluginPlan, resolveHost } from "./plugins.js";
 import { detectHost, hostPluginStatus, installHostPlugin, uninstallHostPlugin, updateHostPlugin } from "./plugin-installer.js";
-
-const VERSION = "0.1.0";
+import { CLI_VERSION } from "./version.js";
 
 function parseArgs(argv) {
   const flags = {
@@ -60,7 +59,7 @@ function jsonOutput(command, ok, result) {
 }
 
 function printHelp() {
-  process.stdout.write(`NamoID CLI ${VERSION}\n\n`);
+  process.stdout.write(`NamoID CLI ${CLI_VERSION}\n\n`);
   process.stdout.write("Usage: namoid <command> [options]\n\n");
   process.stdout.write("Commands:\n");
   process.stdout.write("  login             Sign in securely in the system browser\n");
@@ -235,7 +234,7 @@ export async function run(argv) {
     return;
   }
   if (command === "--version" || command === "-v" || command === "version") {
-    process.stdout.write(`${VERSION}\n`);
+    process.stdout.write(`${CLI_VERSION}\n`);
     return;
   }
 
