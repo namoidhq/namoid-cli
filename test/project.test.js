@@ -97,3 +97,59 @@ test("rejects internal app origins and public secret names without exposing valu
   assert.ok(result.checks.some((item) => item.id === "env.gitignore" && item.status === "fail"));
   assert.equal(serialized.includes("do-not-print-this"), false);
 });
+
+test("detects FastAPI, Python SDK versions, and Python-specific guidance", async () => {
+  const root = await fixture("fastapi");
+  await writeFile(path.join(root, "pyproject.toml"), [
+    "[project]",
+    'name = "acme-api"',
+    'dependencies = ["fastapi>=0.115", "namoid>=0.2.0"]',
+  ].join("\n"));
+  await writeFile(path.join(root, ".env.example"), [
+    "NAMOID_CLIENT_ID=",
+    "NAMOID_CLIENT_SECRET=",
+  ].join("\n"));
+
+  const project = await inspectProject(root);
+  const result = diagnoseProject(project);
+
+  assert.equal(project.framework, "fastapi");
+  assert.deepEqual(project.sdkPackages, [{ name: "namoid", version: "0.2.0" }]);
+  assert.equal(result.guidance.package, "namoid>=0.2.0");
+  assert.equal(result.guidance.callback, "FastAPI callback endpoint");
+  assert.ok(result.checks.some((item) => item.id === "namoid.sdk_version.namoid" && item.status === "pass"));
+  assert.equal(result.checks.some((item) => item.id === "env.next_public_app_url"), false);
+});
+
+test("fails obsolete SDK versions and reports a concrete upgrade", async () => {
+  const root = await fixture("obsolete-sdk");
+  await writeFile(path.join(root, "package.json"), JSON.stringify({
+    name: "old-spa",
+    dependencies: { react: "19.0.0", "@namoidhq/js": "2.9.0" },
+  }));
+
+  const result = diagnoseProject(await inspectProject(root));
+  const version = result.checks.find((item) => item.id === "namoid.sdk_version.@namoidhq/js");
+  assert.equal(version.status, "fail");
+  assert.match(version.remediation, /3\.2\.0/);
+});
+
+test("reports static evidence for the complete Customer Identity lifecycle", async () => {
+  const root = await fixture("auth-signals");
+  await writeFile(path.join(root, "package.json"), JSON.stringify({
+    name: "secure-next",
+    dependencies: { next: "15.5.0", react: "19.0.0", "@namoidhq/nextjs": "4.0.0" },
+  }));
+  await writeFile(path.join(root, "auth.ts"), [
+    "const { state, nonce, codeVerifier } = transaction;",
+    "validateOIDCIdToken({ nonce });",
+    "client.refresh(refreshToken);",
+    "client.revoke(refreshToken);",
+    "client.logout();",
+  ].join("\n"));
+
+  const result = diagnoseProject(await inspectProject(root));
+  for (const id of ["state", "nonce", "pkce", "idTokenValidation", "refresh", "logout"]) {
+    assert.equal(result.checks.find((item) => item.id === `namoid.flow.${id}`).status, "pass");
+  }
+});

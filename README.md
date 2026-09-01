@@ -26,8 +26,8 @@ Requires Node.js 20 or newer.
 ## Commands
 
 Start from the application repository with one command. `init` signs in when
-needed, detects the local setup, creates the NamoID Application after one
-confirmation, and connects a supported AI host to NamoID MCP:
+needed, detects the local setup, and creates the NamoID Application after one
+confirmation:
 
 ```bash
 npx @namoidhq/cli init
@@ -63,15 +63,22 @@ It detects supported frameworks, installed NamoID SDKs, callback routes, and
 required environment-variable names. It never prints environment-variable
 values.
 
+`namoid doctor` recognizes Next.js, React, Express + React, FastAPI, Flask, and
+Django. It checks supported SDK versions and looks for static evidence of
+state, nonce, S256 PKCE, ID-token validation, refresh rotation, revocation, and
+logout. Missing source evidence is reported as a warning because an application
+may encapsulate the control in shared middleware; it is never presented as
+proof of runtime security.
+
 `namoid init` is the recommended first command. It detects the framework,
-package name, dev port, callback route, SDK, and the active Codex or Claude Code
-host. When no CLI session exists it opens browser login automatically. After
+package name, dev port, callback route, and SDK. When no CLI session exists it opens browser login automatically. After
 login, it asks for the Application name and clearly identifies that name as
 public on hosted sign-in and consent screens. The detected package name is only
-a suggested default. After one confirmation it creates the Application, configures
-`https://mcp.namoid.in` in the detected AI host, and starts that host's OAuth
-login. Non-interactive runs must provide `--name`. Use `--mcp-host none` when
-only Application setup is wanted.
+a suggested default. After one confirmation it creates the Application.
+For a confidential web Application, the Client Secret is returned once and must
+be stored immediately as `NAMOID_CLIENT_SECRET` in server-only secret storage.
+Non-interactive runs must provide `--name`. AI extension setup is separate and
+opt-in through `namoid setup codex` or `namoid setup claude`.
 
 The CLI is an OAuth public native client. `namoid login` opens the system
 browser, uses Authorization Code with S256 PKCE, and receives the callback on a
@@ -99,6 +106,21 @@ namoid plugin install cc             # aliases: cc, claude-code, openai
 namoid plugin status                 # inspect all supported hosts
 namoid plugin update claude --dry-run
 namoid plugin uninstall codex
+```
+
+## Customer Identity skills
+
+The published CLI contains six versioned, portable Customer Identity skills:
+setup, diagnosis, verification, secure logout, session review, and production
+readiness. `setup` installs both the verified host extension and these skills;
+they can also be managed independently:
+
+```bash
+namoid skills install codex
+namoid skills install claude
+namoid skills status
+namoid skills update codex --dry-run
+namoid skills uninstall claude
 ```
 
 Mutating commands prompt by default. Use `--yes` only for an intentional
