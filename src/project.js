@@ -63,7 +63,7 @@ async function findSourceFiles(root) {
         if (!ignored.has(entry.name)) await walk(path.join(directory, entry.name), depth + 1);
         continue;
       }
-      if (/\.(?:js|jsx|mjs|ts|tsx)$/.test(entry.name)) files.push(path.join(directory, entry.name));
+      if (/\.(?:js|jsx|mjs|py|ts|tsx)$/.test(entry.name)) files.push(path.join(directory, entry.name));
     }
   }
   await walk(root, 0);
@@ -74,6 +74,14 @@ async function scanSource(root) {
   const findings = {
     nextAuthLinks: [],
     internalOriginRedirects: [],
+    authSignals: {
+      state: false,
+      nonce: false,
+      pkce: false,
+      idTokenValidation: false,
+      refresh: false,
+      logout: false,
+    },
   };
   for (const absolute of await findSourceFiles(root)) {
     let content;
@@ -89,6 +97,12 @@ async function scanSource(root) {
     if (/new URL\(\s*["']\/(?:dashboard|account|app)[^"']*["']\s*,\s*request\.url\s*\)/.test(content)) {
       findings.internalOriginRedirects.push(relative);
     }
+    findings.authSignals.state ||= /\bstate\b/.test(content);
+    findings.authSignals.nonce ||= /\bnonce\b/.test(content);
+    findings.authSignals.pkce ||= /code[_A-Z]?verifier|codeVerifier|code[_A-Z]?challenge|codeChallenge|create_oidc_transaction|createOIDCTransaction/.test(content);
+    findings.authSignals.idTokenValidation ||= /validate_id_token|validateOIDCIdToken|idTokenClaims/.test(content);
+    findings.authSignals.refresh ||= /refresh[_A-Z]?token|refreshToken|\.refresh\(/.test(content);
+    findings.authSignals.logout ||= /logout_url|getLogoutUrl|revoke_token|revokeToken|\.logout\(|\.revoke\(/.test(content);
   }
   return findings;
 }
@@ -97,12 +111,52 @@ function dependenciesOf(pkg) {
   return { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
 }
 
-function detectFramework(dependencies) {
+function detectFramework(dependencies, pythonText = "") {
   if (dependencies.next) return "nextjs";
   if (dependencies.react && dependencies.express) return "express-react";
   if (dependencies.react) return "react";
+  if (/\b(?:fastapi|FastAPI)\b/.test(pythonText)) return "fastapi";
+  if (/\b(?:django|Django)\b/.test(pythonText)) return "django";
+  if (/\b(?:flask|Flask)\b/.test(pythonText)) return "flask";
   return "unknown";
 }
+
+function pythonSdkVersion(text) {
+  const match = text.match(/(?:^|[\s"'])namoid(?:\[[^\]]+\])?\s*(?:==|~=|>=|\^)?\s*([0-9]+(?:\.[0-9]+){1,2})?/im);
+  return match ? (match[1] ?? "unspecified") : null;
+}
+
+function numericVersion(value) {
+  const match = String(value).match(/(\d+)\.(\d+)\.(\d+)/);
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function versionAtLeast(value, minimum) {
+  const current = numericVersion(value);
+  const target = numericVersion(minimum);
+  if (!current || !target) return null;
+  for (let index = 0; index < 3; index += 1) {
+    if (current[index] !== target[index]) return current[index] > target[index];
+  }
+  return true;
+}
+
+const SDK_MINIMUMS = {
+  "@namoidhq/js": "3.2.0",
+  "@namoidhq/react": "4.0.0",
+  "@namoidhq/nextjs": "4.0.0",
+  namoid: "0.2.0",
+};
+
+const FRAMEWORK_GUIDANCE = {
+  nextjs: { package: "@namoidhq/nextjs", callback: "App Router route handler", session: "server-side HttpOnly cookie session" },
+  react: { package: "@namoidhq/react", callback: "same-origin SPA callback", session: "backend-for-frontend session when refresh tokens are needed" },
+  "express-react": { package: "@namoidhq/js", callback: "server callback route", session: "server-side HttpOnly cookie session" },
+  fastapi: { package: "namoid>=0.2.0", callback: "FastAPI callback endpoint", session: "server-side session middleware" },
+  flask: { package: "namoid>=0.2.0", callback: "Flask callback route", session: "server-side session storage" },
+  django: { package: "namoid>=0.2.0", callback: "Django callback view", session: "Django server-side session" },
+  unknown: { package: "standards-based OIDC SDK", callback: "registered callback endpoint", session: "server-side session for confidential clients" },
+};
 
 function detectDevPort(pkg) {
   const scripts = Object.values(pkg?.scripts ?? {}).filter((value) => typeof value === "string");
@@ -132,12 +186,19 @@ async function detectPackageManager(root, pkg) {
 export async function inspectProject(root) {
   const packagePath = path.join(root, "package.json");
   const pkg = await readJson(packagePath);
+  const pythonManifestText = [
+    await readText(path.join(root, "pyproject.toml")),
+    await readText(path.join(root, "requirements.txt")),
+    await readText(path.join(root, "requirements-dev.txt")),
+  ].filter(Boolean).join("\n");
   const dependencies = dependenciesOf(pkg);
-  const framework = detectFramework(dependencies);
+  const framework = detectFramework(dependencies, pythonManifestText);
   const packageManager = await detectPackageManager(root, pkg);
-  const sdkPackages = ["@namoidhq/nextjs", "@namoidhq/js"]
+  const sdkPackages = ["@namoidhq/nextjs", "@namoidhq/react", "@namoidhq/js"]
     .filter((name) => dependencies[name])
     .map((name) => ({ name, version: dependencies[name] }));
+  const pythonVersion = pythonSdkVersion(pythonManifestText);
+  if (pythonVersion) sdkPackages.push({ name: "namoid", version: pythonVersion });
 
   const callbackCandidates = await findFiles(
     root,
@@ -178,6 +239,7 @@ export async function inspectProject(root) {
   return {
     root,
     packageJson: pkg ? "package.json" : null,
+    pythonManifest: pythonManifestText ? "python" : null,
     packageName: typeof pkg?.name === "string" ? pkg.name : null,
     framework,
     usesVite: Boolean(dependencies.vite),
@@ -200,9 +262,9 @@ function check(id, status, message, remediation = null) {
 export function diagnoseProject(project) {
   const checks = [];
   checks.push(
-    project.packageJson
-      ? check("project.package_json", "pass", "Found package.json.")
-      : check("project.package_json", "fail", "No package.json was found.", "Run this command from the application root."),
+    project.packageJson || project.pythonManifest
+      ? check("project.manifest", "pass", `Found ${project.packageJson ?? "Python dependency manifest"}.`)
+      : check("project.manifest", "fail", "No supported dependency manifest was found.", "Run this command from the application root."),
   );
 
   checks.push(
@@ -213,6 +275,38 @@ export function diagnoseProject(project) {
         : check("project.package_manager", "warn", "No package manager was detected.", "Declare packageManager in package.json or create one lockfile."),
   );
 
+  for (const sdk of project.sdkPackages) {
+    const minimum = SDK_MINIMUMS[sdk.name];
+    if (!minimum) continue;
+    const supported = versionAtLeast(sdk.version, minimum);
+    checks.push(
+      supported === false
+        ? check(`namoid.sdk_version.${sdk.name}`, "fail", `${sdk.name} ${sdk.version} is below the supported ${minimum}.`, `Upgrade to ${sdk.name}@${minimum} or newer.`)
+        : supported === null
+          ? check(`namoid.sdk_version.${sdk.name}`, "warn", `Could not determine the installed ${sdk.name} version from ${sdk.version}.`, `Pin ${sdk.name} to ${minimum} or newer and regenerate the lockfile.`)
+          : check(`namoid.sdk_version.${sdk.name}`, "pass", `${sdk.name} ${sdk.version} meets the supported ${minimum}.`),
+    );
+  }
+
+  if (project.sdkPackages.length > 0) {
+    const signalChecks = [
+      ["state", "OAuth state handling", "Use the SDK transaction and compare callback state before exchanging the code."],
+      ["nonce", "OIDC nonce handling", "Persist the SDK transaction nonce and require it during ID-token validation."],
+      ["pkce", "S256 PKCE handling", "Use the SDK transaction code verifier; never generate or downgrade to plain PKCE."],
+      ["idTokenValidation", "local ID-token validation", "Validate signature, issuer, audience, expiry, and nonce before creating a session."],
+      ["refresh", "refresh-token handling", "Handle refresh rotation server-side and clear the session when refresh fails."],
+      ["logout", "token revocation or provider logout", "Revoke refresh tokens, clear the local session, and use the discovered logout endpoint."],
+    ];
+    for (const [key, label, remediation] of signalChecks) {
+      const detected = project.sourceFindings.authSignals[key];
+      checks.push(
+        detected
+          ? check(`namoid.flow.${key}`, "pass", `Found source evidence of ${label}.`)
+          : check(`namoid.flow.${key}`, "warn", `No source evidence of ${label} was detected.`, remediation),
+      );
+    }
+  }
+
   checks.push(
     project.framework === "unknown"
       ? check("project.framework", "warn", "No supported web framework was detected.", "Use Hosted Auth with the generic OIDC integration guidance.")
@@ -222,7 +316,18 @@ export function diagnoseProject(project) {
   checks.push(
     project.sdkPackages.length > 0
       ? check("namoid.sdk", "pass", `Found ${project.sdkPackages.map((item) => item.name).join(", ")}.`)
-      : check("namoid.sdk", "fail", "No NamoID SDK package was found.", project.framework === "nextjs" ? "Install @namoidhq/nextjs." : "Install @namoidhq/js."),
+      : check(
+          "namoid.sdk",
+          "fail",
+          "No NamoID SDK package was found.",
+          ["fastapi", "flask", "django"].includes(project.framework)
+            ? "Install namoid>=0.2.0."
+            : project.framework === "nextjs"
+              ? "Install @namoidhq/nextjs."
+              : project.framework === "react"
+                ? "Install @namoidhq/react."
+                : "Install @namoidhq/js.",
+        ),
   );
 
   if (project.framework === "nextjs") {
@@ -253,7 +358,8 @@ export function diagnoseProject(project) {
     );
   }
 
-  const requiredNames = ["NAMOID_CLIENT_ID", "NEXT_PUBLIC_APP_URL"];
+  const isPython = ["fastapi", "flask", "django"].includes(project.framework);
+  const requiredNames = isPython ? ["NAMOID_CLIENT_ID"] : ["NAMOID_CLIENT_ID", "NEXT_PUBLIC_APP_URL"];
   for (const name of requiredNames) {
     checks.push(
       project.envNames.includes(name)
@@ -303,7 +409,7 @@ export function diagnoseProject(project) {
     );
   }
 
-  if (project.framework === "nextjs") {
+  if (project.framework === "nextjs" || isPython) {
     checks.push(
       project.envNames.includes("NAMOID_CLIENT_SECRET")
         ? check("env.namoid_client_secret", "pass", "NAMOID_CLIENT_SECRET is declared for the server integration.")
@@ -317,6 +423,10 @@ export function diagnoseProject(project) {
     sdkPackages: project.sdkPackages,
     callbackCandidates: project.callbackCandidates,
     envFiles: project.envFiles,
+    guidance: {
+      ...FRAMEWORK_GUIDANCE[project.framework],
+      flow: ["discover issuer metadata", "create state, nonce, and S256 PKCE", "exchange code at the discovered token endpoint", "validate the ID token and UserInfo subject", "create the application session", "rotate refresh tokens", "revoke tokens and perform provider logout"],
+    },
     checks,
     summary: {
       passed: checks.filter((item) => item.status === "pass").length,

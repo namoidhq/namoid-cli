@@ -51,18 +51,6 @@ export function buildOnboardingPlan(project, diagnosis, target = {}) {
       target: "namoid",
       available: true,
     }),
-    action("mcp.host.detect", "Detect a supported AI host", {
-      target: "local",
-      available: true,
-    }),
-    action("mcp.server.configure", "Configure the canonical NamoID MCP server", {
-      target: "ai-host",
-      available: true,
-    }),
-    action("mcp.oauth.authorize", "Authorize NamoID MCP using the AI host's OAuth flow", {
-      target: "ai-host",
-      available: true,
-    }),
     action("local.environment", "Preview local environment configuration", {
       target: "repository",
       available: false,
