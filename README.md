@@ -89,9 +89,10 @@ permissions and are revoked by `namoid logout`.
 AI host plugins remain separate OAuth clients owned by Codex or Claude; the CLI
 does not copy or share their credentials.
 
-Host plugins live in separate repositories. The CLI installs only immutable
-releases pinned to an exact Git commit and deterministic archive SHA-256; it
-never downloads plugin code from a moving branch.
+Host plugins live in separate official NamoID repositories. The CLI registers
+those repositories as native Codex or Claude marketplaces and asks the host's
+plugin manager to install and update the plugin. Plugin releases therefore do
+not require a matching npm release of the NamoID CLI.
 
 Run `namoid ai setup codex` or `namoid ai setup claude` to verify and install
 the corresponding marketplace for the current user. Add `--dry-run` to preview
@@ -129,10 +130,11 @@ non-interactive run. `--json` returns the stable schema used by automation, and
 
 ## Security
 
-The CLI does not print environment-variable values and verifies AI plugins
-against an immutable Git commit and deterministic archive SHA-256 before
-installation. Report vulnerabilities privately according to
-[SECURITY.md](./SECURITY.md).
+The CLI does not print environment-variable values. AI plugins are installed
+only from the official NamoID marketplace repositories through each host's
+native plugin manager. Review repository changes and protect releases with
+GitHub branch protection, required reviews, and release immutability. Report
+vulnerabilities privately according to [SECURITY.md](./SECURITY.md).
 
 ## Links
 

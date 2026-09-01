@@ -1,5 +1,3 @@
-const PLUGIN_VERSION = "0.1.0";
-
 export const HOST_PLUGINS = Object.freeze({
   codex: Object.freeze({
     host: "codex",
@@ -7,9 +5,7 @@ export const HOST_PLUGINS = Object.freeze({
     executable: "codex",
     displayName: "Codex",
     repository: "https://github.com/namoidhq/namoid-codex-plugin",
-    version: PLUGIN_VERSION,
-    releaseCommit: "deca04e3896ed545863db18cae7197d374cda2e3",
-    archiveSha256: "8d1d2e4debd558ffa97687928779052407b82bee8142eddee2b0e42700756d3d",
+    marketplaceSource: "https://github.com/namoidhq/namoid-codex-plugin",
     marketplacePath: ".agents/plugins/marketplace.json",
     pluginName: "namoid-setup-assistant",
   }),
@@ -19,9 +15,7 @@ export const HOST_PLUGINS = Object.freeze({
     executable: "claude",
     displayName: "Claude Code",
     repository: "https://github.com/namoidhq/namoid-claude-plugin",
-    version: PLUGIN_VERSION,
-    releaseCommit: "26a9d819c330bbc6bda7c8ab572dda9f97bc2a3f",
-    archiveSha256: "e4a8d8a2f420f288e85ae1c6ad314e77e61c6e67ae855fa370898c5f04f509ba",
+    marketplaceSource: "namoidhq/namoid-claude-plugin",
     marketplacePath: ".claude-plugin/marketplace.json",
     pluginName: "namoid-setup-assistant",
   }),
@@ -39,16 +33,15 @@ export function pluginPlan(host) {
   }
   return {
     ...plugin,
-    releaseTag: `v${plugin.version}`,
-    mutableSourceAllowed: false,
+    updateStrategy: "host-marketplace",
     actions: [
       {
-        id: "plugin.release.verify",
-        description: `Verify ${plugin.displayName} plugin release v${plugin.version} and its SHA-256 digest.`,
+        id: "plugin.marketplace.register",
+        description: `Register the official NamoID ${plugin.displayName} marketplace.`,
       },
       {
         id: "plugin.marketplace.install",
-        description: `Install ${plugin.pluginName} from the pinned ${plugin.displayName} marketplace release.`,
+        description: `Install ${plugin.pluginName} through the ${plugin.displayName} plugin manager.`,
       },
       {
         id: "plugin.oauth.authorize",
