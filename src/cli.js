@@ -187,7 +187,7 @@ async function runPluginLifecycle(action, host, flags) {
   const plan = pluginPlan(host);
   if (flags.dryRun) {
     if (flags.json) jsonOutput(`plugin.${action}`, true, { ...plan, dryRun: true });
-    else process.stdout.write(`Would ${action} ${plan.displayName} plugin ${plan.releaseTag}.\n`);
+    else process.stdout.write(`Would ${action} the ${plan.displayName} plugin from the official NamoID marketplace.\n`);
     return;
   }
   if (!detectHost(plan)) throw new Error(`${plan.displayName} is not installed or not available on PATH.`);

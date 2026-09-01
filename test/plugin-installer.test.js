@@ -1,22 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { detectHost, hostInstallCommands, hostPluginStatus, hostUninstallCommands, pluginCachePath } from "../src/plugin-installer.js";
+import { detectHost, hostInstallCommands, hostPluginStatus, hostUninstallCommands, installHostPlugin, updateHostPlugin } from "../src/plugin-installer.js";
 import { HOST_PLUGINS } from "../src/plugins.js";
 
-test("uses a release-addressed private cache path", () => {
-  const location = pluginCachePath(HOST_PLUGINS.codex, "/home/tester");
-  assert.equal(location, `/home/tester/.namoid/plugins/codex/${HOST_PLUGINS.codex.releaseCommit}`);
-});
-
-test("installs the verified Codex marketplace without a moving Git ref", () => {
-  const commands = hostInstallCommands(HOST_PLUGINS.codex, "/verified/codex");
-  assert.deepEqual(commands[0], ["codex", ["plugin", "marketplace", "add", "/verified/codex"]]);
+test("installs Codex from the official repository marketplace", () => {
+  const commands = hostInstallCommands(HOST_PLUGINS.codex);
+  assert.deepEqual(commands[0], ["codex", ["plugin", "marketplace", "add", "https://github.com/namoidhq/namoid-codex-plugin"]]);
   assert.deepEqual(commands[1], ["codex", ["plugin", "add", "namoid-setup-assistant@namoid"]]);
 });
 
 test("installs the verified Claude marketplace for the current user", () => {
-  const commands = hostInstallCommands(HOST_PLUGINS.claude, "/verified/claude");
-  assert.deepEqual(commands[0], ["claude", ["plugin", "marketplace", "add", "/verified/claude", "--scope", "user"]]);
+  const commands = hostInstallCommands(HOST_PLUGINS.claude);
+  assert.deepEqual(commands[0], ["claude", ["plugin", "marketplace", "add", "namoidhq/namoid-claude-plugin", "--scope", "user"]]);
   assert.deepEqual(commands[1], ["claude", ["plugin", "install", "namoid-setup-assistant@namoid", "--scope", "user"]]);
 });
 
@@ -60,4 +55,19 @@ test("reports unknown status when a detected host cannot list plugins", () => {
   assert.equal(status.detected, true);
   assert.equal(status.installed, false);
   assert.equal(status.status, "unknown");
+});
+
+test("installs without cloning or resolving a CLI-pinned release", () => {
+  const calls = [];
+  const result = installHostPlugin(HOST_PLUGINS.codex, { run: (command, args) => calls.push([command, args]) });
+  assert.equal(result.updateStrategy, "host-marketplace");
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(([command]) => command === "codex"));
+});
+
+test("updates through the host marketplace lifecycle", () => {
+  const calls = [];
+  updateHostPlugin(HOST_PLUGINS.claude, { run: (command, args) => calls.push([command, args]) });
+  assert.deepEqual(calls.map(([command]) => command), ["claude", "claude", "claude", "claude"]);
+  assert.equal(calls.some(([command]) => command === "git"), false);
 });
