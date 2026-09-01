@@ -2,9 +2,9 @@ import { execFileSync } from "node:child_process";
 import { detectHost } from "./plugin-installer.js";
 import { HOST_PLUGINS, resolveHost } from "./plugins.js";
 
-export const MCP_SERVER_NAME = "namoid-setup-assistant";
+export const MCP_SERVER_NAME = "namoid-customer-identity";
 export const MCP_SERVER_URL = "https://mcp.namoid.in";
-const MCP_SCOPES = "setup.identity.read,setup.identity.write,setup.agent_auth.read";
+const MCP_SCOPES = "customer-identity:read,customer-identity:configure";
 
 function runText(run, command, args) {
   return String(run(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));

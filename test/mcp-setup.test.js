@@ -21,8 +21,8 @@ test("replaces a stale Codex MCP URL and starts host-owned OAuth", () => {
     return "";
   };
   const result = setupAndAuthorizeMcp(HOST_PLUGINS.codex, { run });
-  assert.ok(calls.some(([command, args]) => command === "codex" && args.join(" ") === "mcp remove namoid-setup-assistant"));
-  assert.ok(calls.some(([command, args]) => command === "codex" && args.join(" ") === `mcp add namoid-setup-assistant --url ${MCP_SERVER_URL}`));
+  assert.ok(calls.some(([command, args]) => command === "codex" && args.join(" ") === "mcp remove namoid-customer-identity"));
+  assert.ok(calls.some(([command, args]) => command === "codex" && args.join(" ") === `mcp add namoid-customer-identity --url ${MCP_SERVER_URL}`));
   assert.ok(calls.some(([command, args]) => command === "codex" && args[0] === "mcp" && args[1] === "login"));
   assert.equal(result.authorized, true);
 });

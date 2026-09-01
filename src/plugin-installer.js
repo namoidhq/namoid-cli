@@ -17,13 +17,14 @@ export function hostInstallCommands(plugin) {
 }
 
 export function hostUninstallCommands(plugin) {
-  const selector = `${plugin.pluginName}@namoid`;
+  const selectors = [plugin.pluginName, ...(plugin.legacyPluginNames ?? [])]
+    .map((name) => `${name}@namoid`);
   if (plugin.host === "codex") return [
-    ["codex", ["plugin", "remove", selector]],
+    ...selectors.map((selector) => ["codex", ["plugin", "remove", selector]]),
     ["codex", ["plugin", "marketplace", "remove", "namoid"]],
   ];
   if (plugin.host === "claude") return [
-    ["claude", ["plugin", "uninstall", selector, "--scope", "user"]],
+    ...selectors.map((selector) => ["claude", ["plugin", "uninstall", selector, "--scope", "user"]]),
     ["claude", ["plugin", "marketplace", "remove", "namoid", "--scope", "user"]],
   ];
   throw new Error(`Unsupported AI host: ${plugin.host}`);
@@ -46,7 +47,9 @@ export function hostPluginStatus(plugin, { run = execFileSync } = {}) {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const installed = JSON.stringify(JSON.parse(output)).includes(plugin.pluginName);
+    const status = JSON.stringify(JSON.parse(output));
+    const installed = [plugin.pluginName, ...(plugin.legacyPluginNames ?? [])]
+      .some((name) => status.includes(name));
     return { host: plugin.host, detected: true, installed };
   } catch {
     return { host: plugin.host, detected: true, installed: false, status: "unknown" };
@@ -54,12 +57,28 @@ export function hostPluginStatus(plugin, { run = execFileSync } = {}) {
 }
 
 export function installHostPlugin(plugin, { run = execFileSync } = {}) {
+  for (const legacyName of plugin.legacyPluginNames ?? []) {
+    try {
+      const args = plugin.host === "codex"
+        ? ["plugin", "remove", `${legacyName}@namoid`]
+        : ["plugin", "uninstall", `${legacyName}@namoid`, "--scope", "user"];
+      run(plugin.executable, args, { stdio: "ignore" });
+    } catch {
+      // A missing legacy installation is the expected state for new users.
+    }
+  }
   for (const [command, args] of hostInstallCommands(plugin)) run(command, args, { stdio: "inherit" });
   return { host: plugin.host, installed: true, updateStrategy: "host-marketplace" };
 }
 
 export function uninstallHostPlugin(plugin, { run = execFileSync } = {}) {
-  for (const [command, args] of hostUninstallCommands(plugin)) run(command, args, { stdio: "inherit" });
+  for (const [command, args] of hostUninstallCommands(plugin)) {
+    try {
+      run(command, args, { stdio: "inherit" });
+    } catch {
+      // Uninstall remains idempotent across canonical and legacy identifiers.
+    }
+  }
   return { host: plugin.host, removed: true };
 }
 
