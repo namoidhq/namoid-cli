@@ -8,7 +8,6 @@ export const HOST_PLUGINS = Object.freeze({
     marketplaceSource: "https://github.com/namoidhq/namoid-codex-plugin",
     marketplacePath: ".agents/plugins/marketplace.json",
     pluginName: "customer-identity",
-    legacyPluginNames: ["namoid-setup-assistant"],
   }),
   claude: Object.freeze({
     host: "claude",
@@ -19,7 +18,6 @@ export const HOST_PLUGINS = Object.freeze({
     marketplaceSource: "namoidhq/namoid-claude-plugin",
     marketplacePath: ".claude-plugin/marketplace.json",
     pluginName: "customer-identity",
-    legacyPluginNames: ["namoid-setup-assistant"],
   }),
 });
 

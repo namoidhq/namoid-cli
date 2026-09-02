@@ -18,7 +18,6 @@ test("installs the verified Claude marketplace for the current user", () => {
 test("uses host-native uninstall commands", () => {
   assert.deepEqual(hostUninstallCommands(HOST_PLUGINS.codex), [
     ["codex", ["plugin", "remove", "customer-identity@namoid"]],
-    ["codex", ["plugin", "remove", "namoid-setup-assistant@namoid"]],
     ["codex", ["plugin", "marketplace", "remove", "namoid"]],
   ]);
   assert.deepEqual(hostUninstallCommands(HOST_PLUGINS.claude)[0], [
@@ -27,7 +26,7 @@ test("uses host-native uninstall commands", () => {
   ]);
   assert.deepEqual(hostUninstallCommands(HOST_PLUGINS.claude)[1], [
     "claude",
-    ["plugin", "uninstall", "namoid-setup-assistant@namoid", "--scope", "user"],
+    ["plugin", "marketplace", "remove", "namoid", "--scope", "user"],
   ]);
 });
 
@@ -66,14 +65,17 @@ test("installs without cloning or resolving a CLI-pinned release", () => {
   const calls = [];
   const result = installHostPlugin(HOST_PLUGINS.codex, { run: (command, args) => calls.push([command, args]) });
   assert.equal(result.updateStrategy, "host-marketplace");
-  assert.equal(calls.length, 3);
-  assert.deepEqual(calls[0], ["codex", ["plugin", "remove", "namoid-setup-assistant@namoid"]]);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0], [
+    "codex",
+    ["plugin", "marketplace", "add", "https://github.com/namoidhq/namoid-codex-plugin"],
+  ]);
   assert.ok(calls.every(([command]) => command === "codex"));
 });
 
 test("updates through the host marketplace lifecycle", () => {
   const calls = [];
   updateHostPlugin(HOST_PLUGINS.claude, { run: (command, args) => calls.push([command, args]) });
-  assert.deepEqual(calls.map(([command]) => command), ["claude", "claude", "claude", "claude", "claude", "claude"]);
+  assert.deepEqual(calls.map(([command]) => command), ["claude", "claude", "claude", "claude"]);
   assert.equal(calls.some(([command]) => command === "git"), false);
 });

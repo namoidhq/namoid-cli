@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { detectPreferredMcpHost, MCP_SERVER_URL, setupAndAuthorizeMcp } from "../src/mcp-setup.js";
+import {
+  CUSTOMER_IDENTITY_SCOPES,
+  detectPreferredMcpHost,
+  MCP_SERVER_URL,
+  setupAndAuthorizeMcp,
+} from "../src/mcp-setup.js";
 import { HOST_PLUGINS } from "../src/plugins.js";
+
+test("defines canonical Customer Identity scopes structurally", () => {
+  assert.deepEqual(CUSTOMER_IDENTITY_SCOPES, [
+    "customer-identity:read",
+    "customer-identity:configure",
+  ]);
+  assert.equal(Object.isFrozen(CUSTOMER_IDENTITY_SCOPES), true);
+});
 
 test("prefers the active Codex host when both executables exist", () => {
   const host = detectPreferredMcpHost({
