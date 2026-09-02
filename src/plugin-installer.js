@@ -46,7 +46,8 @@ export function hostPluginStatus(plugin, { run = execFileSync } = {}) {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const installed = JSON.stringify(JSON.parse(output)).includes(plugin.pluginName);
+    const status = JSON.stringify(JSON.parse(output));
+    const installed = status.includes(plugin.pluginName);
     return { host: plugin.host, detected: true, installed };
   } catch {
     return { host: plugin.host, detected: true, installed: false, status: "unknown" };
@@ -59,7 +60,13 @@ export function installHostPlugin(plugin, { run = execFileSync } = {}) {
 }
 
 export function uninstallHostPlugin(plugin, { run = execFileSync } = {}) {
-  for (const [command, args] of hostUninstallCommands(plugin)) run(command, args, { stdio: "inherit" });
+  for (const [command, args] of hostUninstallCommands(plugin)) {
+    try {
+      run(command, args, { stdio: "inherit" });
+    } catch {
+      // Uninstall remains idempotent when the plugin or marketplace is absent.
+    }
+  }
   return { host: plugin.host, removed: true };
 }
 

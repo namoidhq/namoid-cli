@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { detectPreferredMcpHost, MCP_SERVER_URL, setupAndAuthorizeMcp } from "../src/mcp-setup.js";
+import {
+  CUSTOMER_IDENTITY_SCOPES,
+  detectPreferredMcpHost,
+  MCP_SERVER_URL,
+  setupAndAuthorizeMcp,
+} from "../src/mcp-setup.js";
 import { HOST_PLUGINS } from "../src/plugins.js";
+
+test("defines canonical Customer Identity scopes structurally", () => {
+  assert.deepEqual(CUSTOMER_IDENTITY_SCOPES, [
+    "customer-identity:read",
+    "customer-identity:configure",
+  ]);
+  assert.equal(Object.isFrozen(CUSTOMER_IDENTITY_SCOPES), true);
+});
 
 test("prefers the active Codex host when both executables exist", () => {
   const host = detectPreferredMcpHost({
@@ -21,8 +34,8 @@ test("replaces a stale Codex MCP URL and starts host-owned OAuth", () => {
     return "";
   };
   const result = setupAndAuthorizeMcp(HOST_PLUGINS.codex, { run });
-  assert.ok(calls.some(([command, args]) => command === "codex" && args.join(" ") === "mcp remove namoid-setup-assistant"));
-  assert.ok(calls.some(([command, args]) => command === "codex" && args.join(" ") === `mcp add namoid-setup-assistant --url ${MCP_SERVER_URL}`));
+  assert.ok(calls.some(([command, args]) => command === "codex" && args.join(" ") === "mcp remove namoid-customer-identity"));
+  assert.ok(calls.some(([command, args]) => command === "codex" && args.join(" ") === `mcp add namoid-customer-identity --url ${MCP_SERVER_URL}`));
   assert.ok(calls.some(([command, args]) => command === "codex" && args[0] === "mcp" && args[1] === "login"));
   assert.equal(result.authorized, true);
 });

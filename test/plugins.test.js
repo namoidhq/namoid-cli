@@ -4,8 +4,8 @@ import { HOST_PLUGINS, pluginPlan, resolveHost } from "../src/plugins.js";
 
 test("keeps Codex and Claude packaging separate while sharing one plugin identity", () => {
   assert.notEqual(HOST_PLUGINS.codex.repository, HOST_PLUGINS.claude.repository);
-  assert.equal(HOST_PLUGINS.codex.pluginName, "namoid-setup-assistant");
-  assert.equal(HOST_PLUGINS.claude.pluginName, "namoid-setup-assistant");
+  assert.equal(HOST_PLUGINS.codex.pluginName, "customer-identity");
+  assert.equal(HOST_PLUGINS.claude.pluginName, "customer-identity");
 });
 
 test("plans installation through the host marketplace", () => {

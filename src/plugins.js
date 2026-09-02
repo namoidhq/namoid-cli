@@ -7,7 +7,7 @@ export const HOST_PLUGINS = Object.freeze({
     repository: "https://github.com/namoidhq/namoid-codex-plugin",
     marketplaceSource: "https://github.com/namoidhq/namoid-codex-plugin",
     marketplacePath: ".agents/plugins/marketplace.json",
-    pluginName: "namoid-setup-assistant",
+    pluginName: "customer-identity",
   }),
   claude: Object.freeze({
     host: "claude",
@@ -17,7 +17,7 @@ export const HOST_PLUGINS = Object.freeze({
     repository: "https://github.com/namoidhq/namoid-claude-plugin",
     marketplaceSource: "namoidhq/namoid-claude-plugin",
     marketplacePath: ".claude-plugin/marketplace.json",
-    pluginName: "namoid-setup-assistant",
+    pluginName: "customer-identity",
   }),
 });
 
@@ -45,7 +45,7 @@ export function pluginPlan(host) {
       },
       {
         id: "plugin.oauth.authorize",
-        description: "Authorize the shared NamoID Setup Assistant MCP in the browser.",
+        description: "Authorize NamoID in the browser.",
       },
       {
         id: "plugin.connection.verify",
