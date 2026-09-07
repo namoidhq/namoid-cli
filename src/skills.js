@@ -1,8 +1,16 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveHost } from "./plugins.js";
+import { assertNoSymlinkComponents } from "./safe-path.js";
 
 const SKILLS_ROOT = fileURLToPath(new URL("../skills", import.meta.url));
 
@@ -15,10 +23,8 @@ export const CUSTOMER_IDENTITY_SKILLS = Object.freeze([
   "prepare-namoid-production",
 ]);
 
-function skillTargetRoot(host, home = homedir()) {
-  if (host.host === "codex") return path.join(home, ".agents", "skills");
-  if (host.host === "claude") return path.join(home, ".claude", "skills");
-  throw new Error(`Unsupported AI host: ${host.host}`);
+function skillTargetRoot(cwd) {
+  return path.join(cwd, ".agents", "skills");
 }
 
 export function validateBundledSkills() {
@@ -36,12 +42,9 @@ export function validateBundledSkills() {
   });
 }
 
-export function skillsStatus(hostName, { home = homedir() } = {}) {
-  const host = resolveHost(hostName);
-  if (!host) throw new Error(`Unsupported AI host: ${hostName}`);
-  const root = skillTargetRoot(host, home);
+export function skillsStatus({ cwd = process.cwd() } = {}) {
+  const root = skillTargetRoot(cwd);
   return {
-    host: host.host,
     root,
     skills: validateBundledSkills().map(({ name }) => ({
       name,
@@ -50,31 +53,73 @@ export function skillsStatus(hostName, { home = homedir() } = {}) {
   };
 }
 
-export function installSkills(hostName, { home = homedir(), dryRun = false } = {}) {
-  const host = resolveHost(hostName);
-  if (!host) throw new Error(`Unsupported AI host: ${hostName}`);
-  const root = skillTargetRoot(host, home);
-  const bundled = validateBundledSkills();
-  const steps = bundled.map(({ name, source }) => ({
-    name,
-    source,
-    destination: path.join(root, name),
-  }));
-  if (!dryRun) {
-    mkdirSync(root, { recursive: true, mode: 0o700 });
-    for (const step of steps) {
-      rmSync(step.destination, { recursive: true, force: true });
-      cpSync(step.source, step.destination, { recursive: true });
+function releaseSkillSteps(release) {
+  if (!release?.files) return validateBundledSkills().map(({ name, source }) => ({ name, source }));
+  return release.manifest.skills.map((name) => {
+    const prefix = `skills/${name}/`;
+    const files = [...release.files.entries()]
+      .filter(([file]) => file.startsWith(prefix))
+      .map(([file, entry]) => ({ relative: file.slice(prefix.length), ...entry }));
+    if (!files.some((file) => file.relative === "SKILL.md")) {
+      throw new Error(`Verified integration release is missing skill: ${name}`);
     }
-  }
-  return { host: host.host, root, dryRun, skills: steps };
+    return { name, files };
+  });
 }
 
-export function uninstallSkills(hostName, { home = homedir(), dryRun = false } = {}) {
-  const status = skillsStatus(hostName, { home });
+export function installSkills({ cwd = process.cwd(), dryRun = false, release = null } = {}) {
+  const root = skillTargetRoot(cwd);
+  const steps = releaseSkillSteps(release).map((step) => ({
+    ...step,
+    destination: path.join(root, step.name),
+  }));
+  if (!dryRun) {
+    assertNoSymlinkComponents(cwd, root);
+    for (const step of steps) assertNoSymlinkComponents(cwd, step.destination);
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+    const stagingRoot = path.join(root, `.namoid-staging-${process.pid}-${Date.now()}`);
+    mkdirSync(stagingRoot, { recursive: true, mode: 0o700 });
+    for (const step of steps) {
+      const staged = path.join(stagingRoot, step.name);
+      if (step.files) {
+        for (const file of step.files) {
+          const target = path.join(staged, ...file.relative.split("/"));
+          mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+          writeFileSync(target, file.bytes, { mode: 0o600 });
+        }
+      } else {
+        cpSync(step.source, staged, { recursive: true });
+      }
+    }
+    for (const step of steps) {
+      const staged = path.join(stagingRoot, step.name);
+      rmSync(step.destination, { recursive: true, force: true });
+      renameSync(staged, step.destination);
+    }
+    rmSync(stagingRoot, { recursive: true, force: true });
+  }
+  return {
+    root,
+    dryRun,
+    source: release?.source ?? "bundled",
+    version: release?.manifest?.version ?? null,
+    skills: steps.map(({ name, destination, files }) => ({
+      name,
+      destination,
+      files: files?.map(({ relative, sha256 }) => ({ path: relative, sha256 })) ?? null,
+    })),
+  };
+}
+
+export function uninstallSkills({ cwd = process.cwd(), dryRun = false } = {}) {
+  const status = skillsStatus({ cwd });
   const targets = status.skills.map(({ name }) => path.join(status.root, name));
   if (!dryRun) {
-    for (const target of targets) rmSync(target, { recursive: true, force: true });
+    assertNoSymlinkComponents(cwd, status.root);
+    for (const target of targets) {
+      assertNoSymlinkComponents(cwd, target);
+      rmSync(target, { recursive: true, force: true });
+    }
   }
-  return { host: status.host, dryRun, removed: targets };
+  return { dryRun, removed: targets };
 }

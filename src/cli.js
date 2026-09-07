@@ -1,38 +1,28 @@
 import process from "node:process";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
-import { applicationSetupResult } from "./application-result.js";
-import { createApplication } from "./api.js";
-import { cliConfig } from "./config.js";
-import { accessToken, login, logout, userInfo } from "./oauth.js";
-import { detectPreferredMcpHost, setupAndAuthorizeMcp } from "./mcp-setup.js";
+import {
+  agentNextSteps,
+  agentRows,
+  installAgentIntegration,
+  removeAgentIntegration,
+} from "./agent-config.js";
+import { AGENTS, parseAgentSelection } from "./agents.js";
+import { readIntegrationLock, removeAgentsFromLock, writeIntegrationLock } from "./integration-lock.js";
+import { loadIntegrationRelease } from "./integration-manifest.js";
 import { diagnoseProject, inspectProject } from "./project.js";
-import { buildOnboardingPlan } from "./planner.js";
-import { detectApplicationSetup } from "./setup-detection.js";
-import { resolveInitTarget } from "./target.js";
-import { HOST_PLUGINS, pluginPlan, resolveHost } from "./plugins.js";
-import { detectHost, hostPluginStatus, installHostPlugin, uninstallHostPlugin, updateHostPlugin } from "./plugin-installer.js";
 import { installSkills, skillsStatus, uninstallSkills } from "./skills.js";
 import { CLI_VERSION } from "./version.js";
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const flags = {
     json: false,
     dryRun: false,
     yes: false,
+    offline: false,
     plain: false,
     cwd: process.cwd(),
-    tenant: null,
-    project: null,
-    environment: null,
-    issuer: null,
-    apiBase: null,
-    clientId: null,
-    name: null,
-    applicationType: null,
-    redirectUri: null,
-    postLogoutRedirectUri: null,
-    mcpHost: "none",
+    agents: [],
   };
   const positional = [];
   for (let index = 0; index < argv.length; index += 1) {
@@ -40,17 +30,18 @@ function parseArgs(argv) {
     if (arg === "--json") flags.json = true;
     else if (arg === "--dry-run") flags.dryRun = true;
     else if (arg === "--yes" || arg === "-y") flags.yes = true;
+    else if (arg === "--offline") flags.offline = true;
     else if (arg === "--plain") flags.plain = true;
-    else if (arg === "--cwd") {
+    else if (arg === "--cwd" || arg === "--path") {
       index += 1;
-      if (!argv[index]) throw new Error("--cwd requires a directory");
+      if (!argv[index]) throw new Error(`${arg} requires a directory`);
       flags.cwd = path.resolve(argv[index]);
-    } else if (["--tenant", "--project", "--environment", "--issuer", "--api-base", "--client-id", "--name", "--type", "--redirect-uri", "--post-logout-redirect-uri", "--mcp-host"].includes(arg)) {
+    } else if (arg === "--agent") {
       index += 1;
-      if (!argv[index]) throw new Error(`${arg} requires a value`);
-      const key = arg.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
-      if (key === "type") flags.applicationType = argv[index];
-      else flags[key] = argv[index];
+      if (!argv[index]) throw new Error("--agent requires an agent name");
+      flags.agents.push(argv[index]);
+    } else if (arg.startsWith("-")) {
+      throw new Error(`Unknown option: ${arg}`);
     } else positional.push(arg);
   }
   return { command: positional[0] ?? "help", args: positional.slice(1), flags };
@@ -64,26 +55,17 @@ function printHelp() {
   process.stdout.write(`NamoID CLI ${CLI_VERSION}\n\n`);
   process.stdout.write("Usage: namoid <command> [options]\n\n");
   process.stdout.write("Commands:\n");
-  process.stdout.write("  login             Sign in securely in the system browser\n");
-  process.stdout.write("  logout            Revoke the CLI session and remove local tokens\n");
-  process.stdout.write("  whoami            Show the signed-in NamoID account\n");
   process.stdout.write("  detect            Detect the local application and NamoID SDK\n");
-  process.stdout.write("  doctor            Diagnose the local NamoID integration\n");
-  process.stdout.write("  init              Select or create a workspace and configure your application\n");
-  process.stdout.write("  setup [host]       Install Customer Identity skills and a verified extension\n");
+  process.stdout.write("  doctor            Diagnose the local application and agent integration\n");
+  process.stdout.write("  init              Install skills and connect detected AI agents\n");
+  process.stdout.write("  agents <action>   List, install, update, or remove agent integrations\n");
+  process.stdout.write("  setup [agent]     Alias for agents install\n");
   process.stdout.write("  skills <action>    Install, update, uninstall, list, or inspect skills\n");
-  process.stdout.write("  extension <action> Manage verified Codex and Claude extensions\n");
+  process.stdout.write("  extension <action> Compatibility alias for agent integrations\n");
   process.stdout.write("\nOptions:\n");
-  process.stdout.write("  --cwd <directory>  Inspect another application directory\n");
-  process.stdout.write("  --tenant <id>      Optional workspace override for automation\n");
-  process.stdout.write("  --project <id>     Optional project override for automation\n");
-  process.stdout.write("  --environment <id> Optional environment override for automation\n");
-  process.stdout.write("  --name <name>       Application name (defaults to package name)\n");
-  process.stdout.write("  --type <type>       Application type: web, spa, or native\n");
-  process.stdout.write("  --redirect-uri <url> Exact application OAuth callback URL\n");
-  process.stdout.write("  --issuer <url>      Override the NamoID OAuth issuer\n");
-  process.stdout.write("  --api-base <url>    Override the NamoID management API\n");
-  process.stdout.write("  --mcp-host <host>   Optional Setup Assistant host: codex, claude, or none\n");
+  process.stdout.write("  --path <directory>  Use another application directory\n");
+  process.stdout.write("  --agent <name>      Select an agent; repeat or use comma-separated names\n");
+  process.stdout.write("  --offline           Use the bundled verified integration release\n");
   process.stdout.write("  --json             Print versioned machine-readable output\n");
   process.stdout.write("  --dry-run          Preview actions without changing anything\n");
   process.stdout.write("  --yes, -y          Skip mutation confirmation\n");
@@ -103,171 +85,32 @@ async function confirmMutation(message, flags) {
   }
 }
 
-function createInteractivePrompt(flags) {
-  const output = flags.json ? process.stderr : process.stdout;
-
-  function requireTerminal() {
-    if (!process.stdin.isTTY || !output.isTTY) {
-      throw new Error(
-        "Workspace selection requires an interactive terminal. For automation, provide --tenant, --project, and --environment.",
-      );
-    }
-  }
-
-  return {
-    async select(message, choices) {
-      requireTerminal();
-      output.write(`\n${message}:\n`);
-      choices.forEach((choice, index) => output.write(`  ${index + 1}. ${choice.label}\n`));
-      const terminal = createInterface({ input: process.stdin, output });
-      try {
-        while (true) {
-          const answer = await terminal.question("Choose an option [1]: ");
-          const selectedIndex = answer.trim() === "" ? 0 : Number(answer.trim()) - 1;
-          if (Number.isInteger(selectedIndex) && choices[selectedIndex]) {
-            return choices[selectedIndex].value;
-          }
-          output.write(`Enter a number from 1 to ${choices.length}.\n`);
-        }
-      } finally {
-        terminal.close();
-      }
-    },
-    async text(message, defaultValue) {
-      requireTerminal();
-      const terminal = createInterface({ input: process.stdin, output });
-      try {
-        const answer = await terminal.question(`${message}${defaultValue ? ` [${defaultValue}]` : ""}: `);
-        const value = answer.trim() || defaultValue;
-        if (!value?.trim()) throw new Error(`${message} is required.`);
-        if (value.length > 256) throw new Error(`${message} must be 256 characters or fewer.`);
-        return value.trim();
-      } finally {
-        terminal.close();
-      }
-    },
-    note(message) {
-      if (!flags.json) output.write(`${message}\n`);
-    },
-  };
-}
-
-async function resolvePublicApplicationName(detected, flags) {
-  if (flags.name) return detected;
-  if (!process.stdin.isTTY || (!process.stdout.isTTY && !flags.json)) {
-    throw new Error(
-      "--name is required in a non-interactive run because the Application name is shown publicly.",
-    );
-  }
-  const output = flags.json ? process.stderr : process.stdout;
-  const terminal = createInterface({ input: process.stdin, output });
-  try {
-    const answer = await terminal.question(
-      `Application name (shown publicly on sign-in and consent screens) [${detected.name}]: `,
-    );
-    const name = answer.trim() || detected.name;
-    if (name.length > 256) throw new Error("Application name must be 256 characters or fewer.");
-    return { ...detected, name };
-  } finally {
-    terminal.close();
-  }
-}
-
-function hostRows() {
-  return Object.values(HOST_PLUGINS).map((plugin) => ({ ...hostPluginStatus(plugin), displayName: plugin.displayName, aliases: plugin.aliases }));
-}
-
-async function runPluginLifecycle(action, host, flags) {
-  if (action === "list" || action === "status") {
-    const rows = host ? [hostPluginStatus(resolveHost(host) ?? pluginPlan(host))] : hostRows();
-    if (flags.json) jsonOutput(`plugin.${action}`, true, rows);
-    else rows.forEach((row) => process.stdout.write(`${row.displayName ?? row.host}: ${row.detected ? (row.installed ? "installed" : "available") : "not detected"}\n`));
-    return;
-  }
-  const plan = pluginPlan(host);
-  if (flags.dryRun) {
-    if (flags.json) jsonOutput(`plugin.${action}`, true, { ...plan, dryRun: true });
-    else process.stdout.write(`Would ${action} the ${plan.displayName} plugin from the official NamoID marketplace.\n`);
-    return;
-  }
-  if (!detectHost(plan)) throw new Error(`${plan.displayName} is not installed or not available on PATH.`);
-  const current = hostPluginStatus(plan);
-  if (action === "install" && current.installed) {
-    const result = { ...current, unchanged: true };
-    if (flags.json) jsonOutput("plugin.install", true, result);
-    else process.stdout.write(`${plan.displayName} plugin is already installed.\n`);
-    return;
-  }
-  if ((action === "update" || action === "uninstall") && !current.installed) {
-    throw new Error(`${plan.displayName} plugin is not installed. Run \`namoid plugin install ${plan.host}\` first.`);
-  }
-  const approved = await confirmMutation(`${action[0].toUpperCase()}${action.slice(1)} the ${plan.displayName} plugin?`, flags);
-  if (!approved) return;
-  let result;
-  if (action === "install") result = installHostPlugin(plan);
-  else if (action === "update") result = updateHostPlugin(plan);
-  else if (action === "uninstall") result = uninstallHostPlugin(plan);
-  else throw new Error("Plugin action must be install, update, uninstall, list, or status.");
-  if (flags.json) jsonOutput(`plugin.${action}`, true, result);
-  else process.stdout.write(`${plan.displayName} plugin ${action} completed.\n`);
-}
-
-function skillRows(host) {
-  const hosts = host ? [resolveHost(host)] : Object.values(HOST_PLUGINS);
-  if (hosts.some((item) => !item)) throw new Error(`Unsupported AI host: ${host}`);
-  return hosts.map((item) => skillsStatus(item.host));
-}
-
-async function runSkillsLifecycle(action, host, flags) {
-  if (action === "list" || action === "status") {
-    const rows = skillRows(host);
-    if (flags.json) jsonOutput(`skills.${action}`, true, rows);
-    else {
-      for (const row of rows) {
-        process.stdout.write(`${HOST_PLUGINS[row.host].displayName}:\n`);
-        for (const skill of row.skills) {
-          process.stdout.write(`- ${skill.name}: ${skill.installed ? "installed" : "available"}\n`);
-        }
-      }
-    }
-    return;
-  }
-  const plugin = resolveHost(host);
-  if (!plugin) {
-    throw new Error("Usage: namoid skills <install|update|uninstall> <codex|claude>");
-  }
-  if (flags.dryRun) {
-    const result = action === "uninstall"
-      ? uninstallSkills(plugin.host, { dryRun: true })
-      : installSkills(plugin.host, { dryRun: true });
-    if (flags.json) jsonOutput(`skills.${action}`, true, result);
-    else result[action === "uninstall" ? "removed" : "skills"].forEach((item) => {
-      const target = typeof item === "string" ? item : item.destination;
-      process.stdout.write(`Would ${action} ${target}.\n`);
-    });
-    return;
-  }
-  const approved = await confirmMutation(
-    `${action[0].toUpperCase()}${action.slice(1)} NamoID Customer Identity skills for ${plugin.displayName}?`,
-    flags,
-  );
-  if (!approved) return;
-  const result = action === "uninstall"
-    ? uninstallSkills(plugin.host)
-    : action === "install" || action === "update"
-      ? installSkills(plugin.host)
-      : null;
-  if (!result) throw new Error("Skills action must be install, update, uninstall, list, or status.");
-  if (flags.json) jsonOutput(`skills.${action}`, true, result);
-  else process.stdout.write(`Customer Identity skills ${action} completed for ${plugin.displayName}.\n`);
-}
-
 function printDetection(project) {
   process.stdout.write(`Application: ${project.packageName ?? "unknown"}\n`);
   process.stdout.write(`Framework: ${project.framework}\n`);
   process.stdout.write(`Package manager: ${project.packageManager ?? "not found"}\n`);
   process.stdout.write(`NamoID SDK: ${project.sdkPackages.map((item) => `${item.name} ${item.version}`).join(", ") || "not found"}\n`);
   process.stdout.write(`Callback route: ${project.callbackCandidates[0] ?? "not found"}\n`);
+}
+
+export function hasDetectedApplication(project) {
+  return Boolean(project.packageJson || project.pythonManifest);
+}
+
+export function projectDirectoryGuidance() {
+  return [
+    "",
+    "Continue from your application directory:",
+    "  cd /path/to/your-application",
+    "  npx @namoidhq/cli init",
+    "",
+    "The CLI will detect your framework and provide the correct SDK, callback, and configuration steps.",
+    "",
+  ].join("\n");
+}
+
+function printProjectDirectoryGuidance(output = process.stdout) {
+  output.write(projectDirectoryGuidance());
 }
 
 function printDoctor(result) {
@@ -285,78 +128,153 @@ function printDoctor(result) {
   }
 }
 
-export async function run(argv) {
-  const { command, args, flags } = parseArgs(argv);
-  const config = cliConfig({ issuer: flags.issuer, apiBase: flags.apiBase, clientId: flags.clientId });
-  if (command === "help" || command === "--help" || command === "-h") {
-    printHelp();
+async function selectAgents(flags, rows) {
+  if (flags.agents.length) return parseAgentSelection(flags.agents);
+  const detected = rows.filter((row) => row.detected && row.id !== "generic");
+  if (!detected.length) return [AGENTS.generic];
+  const output = flags.json ? process.stderr : process.stdout;
+  if (flags.yes || !process.stdin.isTTY || !output.isTTY) {
+    return detected.map((row) => AGENTS[row.id]);
+  }
+  output.write("\nDetected AI agents:\n");
+  detected.forEach((row, index) => output.write(`  ${index + 1}. ${row.displayName}\n`));
+  const terminal = createInterface({ input: process.stdin, output });
+  try {
+    const answer = await terminal.question("Select agents (comma-separated numbers) [all]: ");
+    if (!answer.trim()) return detected.map((row) => AGENTS[row.id]);
+    const indexes = answer.split(",").map((item) => Number(item.trim()) - 1);
+    if (indexes.some((index) => !Number.isInteger(index) || !detected[index])) {
+      throw new Error(`Choose numbers from 1 to ${detected.length}.`);
+    }
+    return [...new Map(indexes.map((index) => [detected[index].id, AGENTS[detected[index].id]])).values()];
+  } finally {
+    terminal.close();
+  }
+}
+
+async function installAgents(agents, flags, { action = "install" } = {}) {
+  const previous = readIntegrationLock(flags.cwd);
+  const release = await loadIntegrationRelease({
+    offline: flags.offline,
+    installedVersion: previous?.integrationVersion ?? null,
+  });
+  const manifest = release.manifest;
+  const skills = installSkills({ cwd: flags.cwd, dryRun: flags.dryRun, release });
+  const results = agents.map((agent) =>
+    installAgentIntegration(agent, flags.cwd, { dryRun: flags.dryRun }),
+  );
+  const lock = writeIntegrationLock(flags.cwd, {
+    integrationVersion: manifest.version,
+    integrationSource: release.source,
+    bundleSha256: release.bundleSha256 ?? null,
+    skills: manifest.skills,
+    agentResults: results,
+    dryRun: flags.dryRun,
+  });
+  return {
+    action,
+    manifestVersion: manifest.version,
+    manifestSource: release.source,
+    warning: release.warning,
+    agents: results,
+    skills,
+    lock,
+  };
+}
+
+async function runAgentLifecycle(action, names, flags) {
+  const rows = agentRows();
+  if (!action || action === "list" || action === "status") {
+    const lock = readIntegrationLock(flags.cwd);
+    const result = rows.map((row) => ({ ...row, installed: Boolean(lock?.agents?.[row.id]) }));
+    if (flags.json) jsonOutput("agents.list", true, result);
+    else result.forEach((row) => process.stdout.write(`${row.displayName}: ${row.detected ? "detected" : "not detected"}${row.installed ? ", configured" : ""}\n`));
     return;
   }
+  if (!["install", "update", "remove", "uninstall"].includes(action)) {
+    throw new Error("Agents action must be install, update, remove, list, or status.");
+  }
+  const agents = names.length ? parseAgentSelection(names) : await selectAgents(flags, rows);
+  const project = await inspectProject(flags.cwd);
+  if (!hasDetectedApplication(project)) {
+    throw new Error(`No supported application was detected.${projectDirectoryGuidance()}`);
+  }
+  const removing = action === "remove" || action === "uninstall";
+  if (!flags.dryRun) {
+    const approved = await confirmMutation(
+      `${removing ? "Remove" : "Configure"} NamoID for ${agents.map((agent) => agent.displayName).join(", ")}?`,
+      flags,
+    );
+    if (!approved) return;
+  }
+  let result;
+  if (removing) {
+    const integrations = agents.map((agent) =>
+      removeAgentIntegration(agent, flags.cwd, { dryRun: flags.dryRun }),
+    );
+    const lock = removeAgentsFromLock(flags.cwd, agents.map((agent) => agent.id), { dryRun: flags.dryRun });
+    if (!lock.lock || Object.keys(lock.lock.agents).length === 0) {
+      uninstallSkills({ cwd: flags.cwd, dryRun: flags.dryRun });
+    }
+    result = { action: "remove", agents: integrations, lock };
+  } else {
+    result = await installAgents(agents, flags, { action });
+  }
+  if (flags.json) jsonOutput(`agents.${action}`, true, result);
+  else process.stdout.write(`NamoID agent ${action} completed.\n`);
+}
+
+async function runProjectSkills(action, flags) {
+  if (!action || action === "list" || action === "status") {
+    const result = skillsStatus({ cwd: flags.cwd });
+    if (flags.json) jsonOutput("skills.list", true, result);
+    else result.skills.forEach((skill) => process.stdout.write(`${skill.name}: ${skill.installed ? "installed" : "available"}\n`));
+    return;
+  }
+  if (!["install", "update", "remove", "uninstall"].includes(action)) {
+    throw new Error("Skills action must be install, update, remove, list, or status.");
+  }
+  const removing = action === "remove" || action === "uninstall";
+  if (!flags.dryRun) {
+    const approved = await confirmMutation(`${removing ? "Remove" : "Install"} project-local NamoID skills?`, flags);
+    if (!approved) return;
+  }
+  const result = removing
+    ? uninstallSkills({ cwd: flags.cwd, dryRun: flags.dryRun })
+    : installSkills({
+        cwd: flags.cwd,
+        dryRun: flags.dryRun,
+        release: await loadIntegrationRelease({
+          offline: flags.offline,
+          installedVersion: readIntegrationLock(flags.cwd)?.integrationVersion ?? null,
+        }),
+      });
+  if (flags.json) jsonOutput(`skills.${action}`, true, result);
+  else process.stdout.write(`Project-local NamoID skills ${action} completed.\n`);
+}
+
+export async function run(argv) {
+  const { command, args, flags } = parseArgs(argv);
+  if (command === "help" || command === "--help" || command === "-h") return printHelp();
   if (command === "--version" || command === "-v" || command === "version") {
     process.stdout.write(`${CLI_VERSION}\n`);
     return;
   }
-
-  if (command === "login") {
-    if (flags.json) process.stderr.write("Opening your browser to sign in to NamoID…\n");
-    else process.stdout.write("Opening your browser to sign in to NamoID…\n");
-    await login(config);
-    const profile = await userInfo(config);
-    const result = { signedIn: true, user: { id: profile.sub, email: profile.email ?? null, name: profile.name ?? null } };
-    if (flags.json) jsonOutput(command, true, result);
-    else process.stdout.write(`Signed in${profile.email ? ` as ${profile.email}` : ""}.\n`);
+  if (["login", "logout", "whoami"].includes(command)) {
+    throw new Error("The NamoID CLI is credential-free. Authenticate through your AI agent's NamoID MCP connection instead.");
+  }
+  if (command === "agents" || command === "agent") {
+    await runAgentLifecycle(args[0], [...args.slice(1), ...flags.agents], flags);
     return;
   }
-
-  if (command === "logout") {
-    await logout(config);
-    if (flags.json) jsonOutput(command, true, { signedIn: false });
-    else process.stdout.write("Signed out of NamoID.\n");
+  if (["plugin", "extension", "ext", "setup"].includes(command)) {
+    const action = command === "setup" ? "install" : args[0];
+    const names = command === "setup" ? [...args, ...flags.agents] : [...args.slice(1), ...flags.agents];
+    await runAgentLifecycle(action, names, flags);
     return;
   }
-
-  if (command === "whoami") {
-    const profile = await userInfo(config);
-    const result = { id: profile.sub, email: profile.email ?? null, name: profile.name ?? null };
-    if (flags.json) jsonOutput(command, true, result);
-    else process.stdout.write(`${profile.email ?? profile.name ?? profile.sub}\n`);
-    return;
-  }
-
-  if (command === "ai") {
-    const action = args[0];
-    const host = args[1];
-    if (action !== "setup" || !host) {
-      throw new Error("Usage: namoid ai setup <codex|claude> --dry-run");
-    }
-    await runPluginLifecycle("install", host, flags);
-    return;
-  }
-
-  if (command === "plugin" || command === "extension" || command === "ext") {
-    await runPluginLifecycle(args[0], args[1], flags);
-    return;
-  }
-
   if (command === "skills" || command === "skill") {
-    await runSkillsLifecycle(args[0], args[1], flags);
-    return;
-  }
-
-  if (command === "setup") {
-    const host = args[0];
-    if (host) {
-      await runPluginLifecycle("install", host, flags);
-      await runSkillsLifecycle("install", host, { ...flags, yes: true });
-      return;
-    }
-    const rows = hostRows();
-    if (flags.json) jsonOutput("setup", true, rows);
-    else {
-      process.stdout.write("Detected AI hosts:\n");
-      rows.forEach((row) => process.stdout.write(`- ${row.displayName}: ${row.detected ? "detected" : "not detected"}\n`));
-      process.stdout.write("Run `namoid setup <codex|claude>` to install its verified extension and Customer Identity skills.\n");
-    }
+    await runProjectSkills(args[0], flags);
     return;
   }
 
@@ -367,128 +285,49 @@ export async function run(argv) {
     return;
   }
   if (command === "doctor") {
-    const result = diagnoseProject(project);
-    const ok = result.summary.failed === 0;
-    if (flags.json) jsonOutput(command, ok, result);
-    else printDoctor(result);
+    const diagnosis = diagnoseProject(project);
+    const agentState = { lock: readIntegrationLock(flags.cwd), skills: skillsStatus({ cwd: flags.cwd }) };
+    const ok = diagnosis.summary.failed === 0 && Boolean(agentState.lock);
+    if (flags.json) jsonOutput(command, ok, { application: diagnosis, agents: agentState });
+    else {
+      printDoctor(diagnosis);
+      process.stdout.write(`${agentState.lock ? "✓" : "!"} Agent integration lockfile ${agentState.lock ? "found" : "not found"}\n`);
+      process.stdout.write(`${agentState.skills.skills.every((skill) => skill.installed) ? "✓" : "!"} Project-local NamoID skills\n`);
+    }
     if (!ok) process.exitCode = 1;
     return;
   }
   if (command === "init") {
-    const diagnosis = diagnoseProject(project);
-    const result = buildOnboardingPlan(project, diagnosis, {
-      tenantId: flags.tenant,
-      projectId: flags.project,
-      environmentId: flags.environment,
-    });
-    let detected = detectApplicationSetup(project, flags);
-    const mcpHost = detectPreferredMcpHost({ requested: flags.mcpHost });
-    result.proposal = {
-      application: detected,
-      mcpHost: mcpHost?.host ?? null,
-    };
-    if (flags.dryRun) {
-      if (flags.json) jsonOutput(command, true, result);
-      else {
-        printDetection(project);
-        process.stdout.write("\nDry run — no files or NamoID configuration will change.\n");
-        process.stdout.write(`Application: ${detected.name} (${detected.applicationType})\n`);
-        process.stdout.write(`Callback: ${detected.redirectUri}\n`);
-        process.stdout.write(`AI host: ${mcpHost?.displayName ?? "not detected"}\n\n`);
-        result.actions.forEach((item, index) => process.stdout.write(`${index + 1}. ${item.description}\n`));
-      }
-      return;
+    if (!hasDetectedApplication(project)) {
+      if (!flags.json) printDetection(project);
+      throw new Error(`No supported application was detected.${projectDirectoryGuidance()}`);
     }
-    let token;
-    try {
-      token = await accessToken(config);
-    } catch (error) {
-      if (!(error instanceof Error) || !/Run `namoid login`/.test(error.message)) throw error;
-      const output = flags.json ? process.stderr : process.stdout;
-      output.write("Opening your browser to sign in to NamoID…\n");
-      await login(config);
-      token = await accessToken(config);
-    }
-    const target = await resolveInitTarget(
-      config,
-      {
-        tenantId: flags.tenant,
-        projectId: flags.project,
-        environmentId: flags.environment,
-      },
-      {
-        accessToken: token,
-        prompt: createInteractivePrompt(flags),
-        suggestedProjectName: detected.name,
-      },
-    );
-    result.target = {
-      tenantId: target.tenantId,
-      projectId: target.projectId,
-      environmentId: target.environmentId,
-    };
-    detected = await resolvePublicApplicationName(detected, flags);
-    result.proposal.application = detected;
+    const agents = await selectAgents(flags, agentRows());
     if (!flags.json) {
       printDetection(project);
-      process.stdout.write("\nSelected NamoID destination:\n");
-      process.stdout.write(`- Workspace: ${target.labels.workspace}\n`);
-      process.stdout.write(`- Project: ${target.labels.project}\n`);
-      process.stdout.write(`- Environment: ${target.labels.environment}\n`);
-      process.stdout.write("\nDetected setup:\n");
-      process.stdout.write(`- Application: ${detected.name} (${detected.applicationType})\n`);
-      process.stdout.write(`- Callback: ${detected.redirectUri}\n`);
-      process.stdout.write(`- AI host: ${mcpHost?.displayName ?? "not detected; MCP setup will be skipped"}\n`);
+      process.stdout.write(`\nSelected agents: ${agents.map((agent) => agent.displayName).join(", ")}\n`);
     }
-    const mutation = mcpHost
-      ? `Create ${detected.name} and configure NamoID MCP for ${mcpHost.displayName}?`
-      : `Create ${detected.name} in the selected NamoID environment?`;
-    const approved = await confirmMutation(mutation, flags);
-    if (!approved) return;
-    const application = await createApplication(
-      config,
-      target,
-      {
-        name: detected.name,
-        application_type: detected.applicationType,
-        redirect_uris: [detected.redirectUri],
-        post_logout_redirect_uris: [detected.postLogoutRedirectUri],
-        allowed_web_origins: [detected.origin],
-        default_return_to: detected.redirectUri,
-        allowed_scopes: ["openid", "profile", "email", "offline_access"],
-        trusted: true,
-      },
-      { accessToken: token },
-    );
-    let mcp = { configured: false, reason: "host_not_detected" };
-    if (mcpHost) {
-      try {
-        const stdio = flags.json ? ["inherit", process.stderr, process.stderr] : "inherit";
-        mcp = setupAndAuthorizeMcp(mcpHost, { stdio });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        process.stderr.write(`Application created, but ${mcpHost.displayName} MCP setup did not finish: ${message}\n`);
-        mcp = { configured: false, reason: "host_setup_failed", host: mcpHost.host };
-      }
+    if (!flags.dryRun) {
+      const approved = await confirmMutation(
+        `Install NamoID Customer Identity for ${agents.map((agent) => agent.displayName).join(", ")}?`,
+        flags,
+      );
+      if (!approved) return;
     }
-    const created = applicationSetupResult(application, mcp);
-    if (flags.json) jsonOutput(command, true, created);
-    else {
-      const outcome = created.replayed ? "Application already ready" : "Created";
-      process.stdout.write(`\n${outcome}: ${created.name}.\nClient ID: ${created.clientId}\n`);
-      if (created.clientSecret) {
-        process.stdout.write(
-          `Client Secret (shown once): ${created.clientSecret}\nStore it as NAMOID_CLIENT_SECRET in server-only secret storage now.\n`,
-        );
-      } else if (created.applicationType === "web" && created.replayed) {
-        process.stdout.write(
-          "The existing confidential Application secret is not retrievable. Rotate it in the Console if it was not saved.\n",
-        );
+    const result = await installAgents(agents, flags);
+    if (flags.json) jsonOutput(command, true, result);
+    else if (flags.dryRun) {
+      process.stdout.write("\nDry run — no files, plugins, MCP configuration, or credentials changed.\n");
+    } else {
+      if (result.warning) process.stderr.write(`Note: ${result.warning} Using bundled verified integrations.\n`);
+      process.stdout.write("\nNamoID Customer Identity agent setup is ready.\n");
+      for (const agent of agents) {
+        for (const step of agentNextSteps(agent)) process.stdout.write(`- ${agent.displayName}: ${step}\n`);
       }
-      if (created.mcp.configured) process.stdout.write(`NamoID MCP is connected for ${mcpHost.displayName}.\n`);
+      process.stdout.write("\nNext, ask your agent: Set up NamoID customer identity for this project.\n");
+      process.stdout.write("Your agent will open NamoID OAuth; the CLI never receives or stores the resulting credentials.\n");
     }
     return;
   }
-
   throw new Error(`Unknown command: ${command}`);
 }

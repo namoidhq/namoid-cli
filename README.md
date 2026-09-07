@@ -4,7 +4,7 @@
 [![CI](https://github.com/namoidhq/namoid-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/namoidhq/namoid-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-Deterministic local setup and diagnostics for NamoID Customer Identity.
+Credential-free setup and diagnostics for NamoID Customer Identity across AI coding agents.
 
 ## Install
 
@@ -25,38 +25,31 @@ Requires Node.js 20 or newer.
 
 ## Commands
 
-Start from the application repository with one command. `init` signs in when
-needed, detects the local setup, and creates the NamoID Application after one
-confirmation:
+Start from the application repository with one command:
 
 ```bash
 npx @namoidhq/cli init
 ```
 
-After browser sign-in, the CLI loads the workspaces and projects available to
-the signed-in account and asks which human-readable destination to use. When no
-suitable workspace or project exists, `init` offers to create it and uses its
-Test environment automatically. UUID flags remain optional overrides for CI or
-other non-interactive automation; people do not need to copy identifiers from
-the Console.
+The CLI detects the project and installed AI agents, installs portable skills
+under `.agents/skills`, and configures the canonical
+`https://mcp.namoid.in` server. The selected agent owns browser OAuth and its
+credentials. The CLI never receives a NamoID access token and does not create
+remote resources itself.
 
-Detection, diagnostics, previews, and optional session controls remain
-available independently:
+Detection, diagnostics, previews, and agent management remain available:
 
 ```bash
 namoid detect
 namoid doctor
 namoid init --dry-run
-namoid login
-namoid whoami
-namoid logout
-node ./bin/namoid.js doctor --json
-node ./bin/namoid.js ai setup codex --dry-run
-node ./bin/namoid.js ai setup claude --dry-run
-node ./bin/namoid.js setup
-node ./bin/namoid.js setup codex --dry-run
-node ./bin/namoid.js plugin status
-node ./bin/namoid.js plugin update claude --dry-run
+namoid agents list
+namoid agents install codex cursor
+namoid agents install --agent gemini --agent antigravity
+namoid agents install github-copilot
+namoid agents update --agent cursor --dry-run
+namoid agents remove copilot
+namoid skills status
 ```
 
 It detects supported frameworks, installed NamoID SDKs, callback routes, and
@@ -70,71 +63,66 @@ logout. Missing source evidence is reported as a warning because an application
 may encapsulate the control in shared middleware; it is never presented as
 proof of runtime security.
 
-`namoid init` is the recommended first command. It detects the framework,
-package name, dev port, callback route, and SDK. When no CLI session exists it opens browser login automatically. After
-login, it asks for the Application name and clearly identifies that name as
-public on hosted sign-in and consent screens. The detected package name is only
-a suggested default. After one confirmation it creates the Application.
-For a confidential web Application, the Client Secret is returned once and must
-be stored immediately as `NAMOID_CLIENT_SECRET` in server-only secret storage.
-Non-interactive runs must provide `--name`. AI extension setup is separate and
-opt-in through `namoid setup codex` or `namoid setup claude`.
+`namoid init` is the recommended first command. It refuses to run outside a
+detected JavaScript or Python application, preventing accidental remote or local
+setup from an unrelated directory. After installation, ask the selected agent:
 
-The CLI is an OAuth public native client. `namoid login` opens the system
-browser, uses Authorization Code with S256 PKCE, and receives the callback on a
-random loopback port. It has no client secret. Rotating tokens are stored in the
-current user's private NamoID configuration directory with owner-only file
-permissions and are revoked by `namoid logout`.
+> Set up NamoID customer identity for this project.
 
-AI host plugins remain separate OAuth clients owned by Codex or Claude; the CLI
-does not copy or share their credentials.
+The agent then starts Authorization Code with S256 PKCE through NamoID MCP. The
+hosted NamoID flow lets the user select the exact workspace, project, and Test
+or Live instances the agent may access. Live access is never selected by the
+CLI.
 
-Host plugins live in separate official NamoID repositories. The CLI registers
-those repositories as native Codex or Claude marketplaces and asks the host's
-plugin manager to install and update the plugin. Plugin releases therefore do
-not require a matching npm release of the NamoID CLI.
+Codex and Claude use their official NamoID marketplace plugins. Cursor, Gemini
+CLI, Antigravity, GitHub Copilot, and compatible agents share the same
+project-local skills. Agent artifacts are versioned independently in
+[`namoidhq/namoid-agent-integrations`](https://github.com/namoidhq/namoid-agent-integrations).
 
-Run `namoid ai setup codex` or `namoid ai setup claude` to verify and install
-the corresponding marketplace for the current user. Add `--dry-run` to preview
-the release identity and installation steps without changing host settings.
-
-## Plugin lifecycle
+## Agent lifecycle
 
 ```bash
-namoid setup                         # detect supported AI hosts
-namoid setup codex                   # verified install with confirmation
-namoid plugin install cc             # aliases: cc, claude-code, openai
-namoid plugin status                 # inspect all supported hosts
-namoid plugin update claude --dry-run
-namoid plugin uninstall codex
+namoid agents list
+namoid agents install codex
+namoid agents install claude cursor gemini antigravity copilot
+namoid agents update --agent cursor --agent gemini
+namoid agents remove copilot
 ```
 
 ## Customer Identity skills
 
-The published CLI contains six versioned, portable Customer Identity skills:
-setup, diagnosis, verification, secure logout, session review, and production
-readiness. `setup` installs both the verified host extension and these skills;
-they can also be managed independently:
+The CLI installs six versioned Customer Identity skills into the application
+repository so local and cloud-capable agents can discover the same guidance:
 
 ```bash
-namoid skills install codex
-namoid skills install claude
+namoid skills install
 namoid skills status
-namoid skills update codex --dry-run
-namoid skills uninstall claude
+namoid skills update --dry-run
+namoid skills remove
 ```
 
+Managed integration state is recorded in `.namoid/agents.lock.json`. Existing
+JSON configuration is merged rather than replaced. Malformed files and symbolic
+links are rejected instead of overwritten.
+
 Mutating commands prompt by default. Use `--yes` only for an intentional
-non-interactive run. `--json` returns the stable schema used by automation, and
-`--plain` keeps output decoration-free.
+non-interactive run. Use `--path` to target another application, `--offline` to
+use bundled verified artifacts, and `--json` for machine-readable output.
+
+GitHub Copilot CLI and VS Code can use NamoID MCP interactively. Copilot cloud
+coding agents and code review receive the project skills only; the CLI does not
+enable MCP tools for those autonomous surfaces.
 
 ## Security
 
-The CLI does not print environment-variable values. AI plugins are installed
-only from the official NamoID marketplace repositories through each host's
-native plugin manager. Review repository changes and protect releases with
-GitHub branch protection, required reviews, and release immutability. Report
-vulnerabilities privately according to [SECURITY.md](./SECURITY.md).
+The CLI stores no NamoID access tokens, refresh tokens, client secrets, or
+workspace authority. OAuth credentials remain in the selected agent's native
+credential store. Generated MCP configuration contains only the canonical HTTPS
+URL—never authorization headers, automatic tool approvals, or secrets.
+
+AI plugins are installed only from official NamoID repositories through the
+host's native plugin manager. Report vulnerabilities privately according to
+[SECURITY.md](./SECURITY.md).
 
 ## Links
 

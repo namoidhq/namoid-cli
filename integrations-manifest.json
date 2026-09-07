@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "version": "0.1.0",
+  "repository": "https://github.com/namoidhq/namoid-agent-integrations",
+  "release": {
+    "channel": "stable",
+    "tag": "v0.1.0",
+    "bundle": "namoid-agent-integrations-0.1.0.bundle.json",
+    "checksums": "SHA256SUMS"
+  },
+  "mcpServer": {
+    "name": "namoid-customer-identity",
+    "url": "https://mcp.namoid.in",
+    "oauth": "authorization-code-pkce",
+    "allowedScopes": [
+      "customer-identity:read",
+      "customer-identity:configure"
+    ],
+    "targetBinding": "instance"
+  },
+  "skills": [
+    "setup-namoid",
+    "diagnose-namoid",
+    "verify-namoid",
+    "implement-namoid-logout",
+    "review-namoid-sessions",
+    "prepare-namoid-production"
+  ],
+  "agents": {
+    "codex": { "skills": true, "mcp": "native-oauth" },
+    "claude": { "skills": true, "mcp": "native-oauth" },
+    "cursor": { "skills": true, "mcp": "mcp.json" },
+    "gemini": { "skills": true, "mcp": "gemini-extension.json" },
+    "antigravity": { "skills": true, "mcp": "adapters/antigravity/.agents/mcp_config.json" },
+    "copilot": { "skills": true, "mcp": "adapters/copilot/.vscode/mcp.json", "cloudMcp": false },
+    "generic": { "skills": true, "mcp": "manual" }
+  }
+}

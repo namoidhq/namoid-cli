@@ -1,7 +1,7 @@
 {
   "name": "@namoidhq/cli",
-  "version": "0.3.2",
-  "description": "Set up and validate NamoID authentication from the command line.",
+  "version": "0.4.0",
+  "description": "Install NamoID Customer Identity skills and MCP configuration for AI coding agents.",
   "keywords": [
     "namoid",
     "authentication",
@@ -26,11 +26,12 @@
   "files": [
     "bin",
     "src",
-    "skills"
+    "skills",
+    "integrations-manifest.json"
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node --check bin/namoid.js && node --check src/api.js && node --check src/application-result.js && node --check src/cli.js && node --check src/config.js && node --check src/mcp-setup.js && node --check src/oauth.js && node --check src/planner.js && node --check src/plugin-installer.js && node --check src/plugins.js && node --check src/project.js && node --check src/setup-detection.js && node --check src/skills.js && node --check src/target.js && node --check src/token-store.js && node --check src/version.js"
+    "check": "node --check bin/namoid.js && node --check src/agent-config.js && node --check src/agents.js && node --check src/cli.js && node --check src/integration-lock.js && node --check src/integration-manifest.js && node --check src/mcp-setup.js && node --check src/plugin-installer.js && node --check src/plugins.js && node --check src/project.js && node --check src/safe-path.js && node --check src/skills.js && node --check src/version.js"
   },
   "engines": {
     "node": ">=20"

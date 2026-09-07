@@ -14,7 +14,7 @@ a Client Component.
 ## React
 
 Use `@namoidhq/react` 4.0.0 or newer with `@namoidhq/js` 3.2.0 or newer. React
-may initiate Authorization Code + S256 PKCE as a public client. Prefer a
+may initiate Authorization Code with S256 PKCE as a public client. Prefer a
 backend-for-frontend when the application needs durable refresh tokens or a
 confidential client. Do not use browser local storage for tokens.
 
@@ -32,5 +32,4 @@ Use `namoid` 0.2.0 or newer. The standard flow is:
 8. `refresh(...)`, `revoke_token(...)`, and `logout_url(...)`
 
 Sync and async clients expose the same contract. Endpoints come from validated
-OIDC discovery; do not use legacy `/v1/auth/hosted/exchange`, `/v1/auth/refresh`,
-or `/v1/auth/logout` for new integrations.
+OIDC discovery; do not use legacy hosted-auth endpoints for new integrations.
